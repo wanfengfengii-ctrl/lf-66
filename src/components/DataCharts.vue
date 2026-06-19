@@ -80,6 +80,7 @@ function initFlowChart() {
   }
 
   flowChart.setOption(option)
+  updateCharts()
 }
 
 function initPressureChart() {
@@ -136,6 +137,7 @@ function initPressureChart() {
   }
 
   pressureChart.setOption(option)
+  updateCharts()
 }
 
 function updateCharts() {
@@ -185,6 +187,14 @@ onUnmounted(() => {
 watch(() => store.params, () => {
   setTimeout(updateCharts, 50)
 }, { deep: true })
+
+watch(() => store.airFlowHistory.length, () => {
+  updateCharts()
+})
+
+watch(() => store.pressureHistory.length, () => {
+  updateCharts()
+})
 </script>
 
 <style scoped>

@@ -11,6 +11,27 @@ import type {
 
 const LEAK_THRESHOLD = 0.3
 const MAX_HISTORY_POINTS = 200
+const STORAGE_KEY = 'bellows_schemes'
+
+function loadSchemesFromStorage(): Scheme[] {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) {
+      return JSON.parse(stored)
+    }
+  } catch (e) {
+    console.error('Failed to load schemes from localStorage:', e)
+  }
+  return []
+}
+
+function saveSchemesToStorage(schemes: Scheme[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(schemes))
+  } catch (e) {
+    console.error('Failed to save schemes to localStorage:', e)
+  }
+}
 
 export const useBellowsStore = defineStore('bellows', () => {
   const params = ref<BellowsParams>({
@@ -35,7 +56,7 @@ export const useBellowsStore = defineStore('bellows', () => {
     valveOpenRight: false
   })
 
-  const schemes = ref<Scheme[]>([])
+  const schemes = ref<Scheme[]>(loadSchemesFromStorage())
   const selectedSchemeIds = ref<string[]>([])
   const isPlaying = ref(true)
   const airFlowHistory = ref<AirFlowDataPoint[]>([])
@@ -103,6 +124,39 @@ export const useBellowsStore = defineStore('bellows', () => {
       theoreticalMaxFlow: theoreticalMaxFlow.value
     }
   })
+
+  function generateHistoryData() {
+    const state = animationState.value
+    const omega = 2 * Math.PI * params.value.rodFrequency
+    const stroke = params.value.pistonStroke / 2
+
+    airFlowHistory.value = []
+    pressureHistory.value = []
+
+    const historyPoints = Math.min(100, MAX_HISTORY_POINTS)
+    const timeStep = 0.05
+
+    for (let i = historyPoints; i >= 1; i--) {
+      const time = state.time - i * timeStep
+      if (time < 0) continue
+
+      const leftVelocity = omega * stroke * Math.cos(omega * time)
+      const leftPressure = 1.0 - 0.3 * Math.sin(omega * time)
+      const rightPressure = 1.0 - 0.3 * Math.sin(omega * time + Math.PI)
+      const instantaneousFlow = Math.abs(leftVelocity) * pistonArea.value * valveFlowCoefficient.value
+
+      airFlowHistory.value.push({
+        time,
+        flowRate: instantaneousFlow
+      })
+
+      pressureHistory.value.push({
+        time,
+        leftPressure,
+        rightPressure
+      })
+    }
+  }
 
   function updateAnimation(deltaTime: number) {
     if (!isPlaying.value) return
@@ -175,7 +229,32 @@ export const useBellowsStore = defineStore('bellows', () => {
       return
     }
     params.value[key] = value
-    resetAnimation()
+
+    const omega = 2 * Math.PI * params.value.rodFrequency
+    const stroke = params.value.pistonStroke / 2
+    const state = animationState.value
+
+    state.leftPistonPosition = Math.sin(omega * state.time) * stroke
+    state.rightPistonPosition = Math.sin(omega * state.time + Math.PI) * stroke
+
+    const leftVelocity = omega * stroke * Math.cos(omega * state.time)
+    const rightVelocity = omega * stroke * Math.cos(omega * state.time + Math.PI)
+
+    state.leftChamberPressure = 1.0 - 0.3 * Math.sin(omega * state.time)
+    state.rightChamberPressure = 1.0 - 0.3 * Math.sin(omega * state.time + Math.PI)
+
+    state.valveOpenLeft = leftVelocity < 0
+    state.valveOpenRight = rightVelocity < 0
+
+    if (state.leftChamberPressure > state.rightChamberPressure) {
+      state.airFlowDirection = 'right'
+    } else if (state.rightChamberPressure > state.leftChamberPressure) {
+      state.airFlowDirection = 'left'
+    } else {
+      state.airFlowDirection = 'none'
+    }
+
+    generateHistoryData()
   }
 
   function saveScheme(name: string) {
@@ -188,6 +267,7 @@ export const useBellowsStore = defineStore('bellows', () => {
       animationState: { ...animationState.value }
     }
     schemes.value.push(scheme)
+    saveSchemesToStorage(schemes.value)
     return scheme.id
   }
 
@@ -200,6 +280,7 @@ export const useBellowsStore = defineStore('bellows', () => {
     if (selectedIndex !== -1) {
       selectedSchemeIds.value.splice(selectedIndex, 1)
     }
+    saveSchemesToStorage(schemes.value)
   }
 
   function loadScheme(id: string) {
@@ -207,7 +288,24 @@ export const useBellowsStore = defineStore('bellows', () => {
     if (scheme) {
       params.value = { ...scheme.params }
       animationState.value = { ...scheme.animationState }
-      resetAnimation()
+
+      const omega = 2 * Math.PI * params.value.rodFrequency
+      const stroke = params.value.pistonStroke / 2
+      const state = animationState.value
+
+      state.leftPistonPosition = Math.sin(omega * state.time) * stroke
+      state.rightPistonPosition = Math.sin(omega * state.time + Math.PI) * stroke
+
+      const leftVelocity = omega * stroke * Math.cos(omega * state.time)
+      const rightVelocity = omega * stroke * Math.cos(omega * state.time + Math.PI)
+
+      state.leftChamberPressure = 1.0 - 0.3 * Math.sin(omega * state.time)
+      state.rightChamberPressure = 1.0 - 0.3 * Math.sin(omega * state.time + Math.PI)
+
+      state.valveOpenLeft = leftVelocity < 0
+      state.valveOpenRight = rightVelocity < 0
+
+      generateHistoryData()
     }
   }
 
@@ -247,6 +345,7 @@ export const useBellowsStore = defineStore('bellows', () => {
     selectedSchemes,
     updateAnimation,
     resetAnimation,
+    generateHistoryData,
     updateParam,
     saveScheme,
     deleteScheme,
