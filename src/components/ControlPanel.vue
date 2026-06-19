@@ -91,7 +91,7 @@
           :value="params.rodFrequency"
           @input="handleSliderChange('rodFrequency', $event)"
           min="0.1"
-          max="10"
+          max="15"
           step="0.1"
           class="param-slider"
         />
@@ -131,6 +131,85 @@
     </div>
 
     <div class="param-section">
+      <h4 class="section-title">外部工况参数</h4>
+
+      <div class="param-item">
+        <label class="param-label">
+          <span>环境阻力系数</span>
+          <span class="param-value">{{ (params.environmentalResistance * 100).toFixed(0) }}%</span>
+        </label>
+        <input
+          type="range"
+          :value="params.environmentalResistance"
+          @input="handleSliderChange('environmentalResistance', $event)"
+          min="0"
+          max="1.8"
+          step="0.01"
+          class="param-slider"
+        />
+        <input
+          type="number"
+          :value="(params.environmentalResistance * 100).toFixed(0)"
+          @change="handlePercentageChange('environmentalResistance', $event)"
+          min="0"
+          max="180"
+          step="1"
+          class="param-input"
+        />
+      </div>
+
+      <div class="param-item">
+        <label class="param-label">
+          <span>负载压力</span>
+          <span class="param-value">{{ params.loadPressure.toFixed(2) }} atm</span>
+        </label>
+        <input
+          type="range"
+          :value="params.loadPressure"
+          @input="handleSliderChange('loadPressure', $event)"
+          min="0"
+          max="2.5"
+          step="0.01"
+          class="param-slider"
+        />
+        <input
+          type="number"
+          :value="params.loadPressure.toFixed(2)"
+          @change="handleInputChange('loadPressure', $event)"
+          min="0"
+          max="5"
+          step="0.01"
+          class="param-input"
+        />
+      </div>
+
+      <div class="param-item">
+        <label class="param-label">
+          <span>漏气率</span>
+          <span class="param-value">{{ params.leakageRate.toFixed(1) }}%</span>
+        </label>
+        <input
+          type="range"
+          :value="params.leakageRate"
+          @input="handleSliderChange('leakageRate', $event)"
+          min="0"
+          max="50"
+          step="0.5"
+          class="param-slider"
+        />
+        <input
+          type="number"
+          :value="params.leakageRate.toFixed(1)"
+          @change="handleInputChange('leakageRate', $event)"
+          min="0"
+          max="100"
+          step="0.1"
+          class="param-input"
+        />
+      </div>
+    </div>
+
+    <div class="param-section">
       <h4 class="section-title">阀片参数</h4>
 
       <div class="param-item">
@@ -142,17 +221,17 @@
           type="range"
           :value="params.valveOpeningArea"
           @input="handleSliderChange('valveOpeningArea', $event)"
-          min="1"
-          max="100"
-          step="0.5"
+          min="50"
+          max="3000"
+          step="10"
           class="param-slider"
         />
         <input
           type="number"
           :value="params.valveOpeningArea"
           @change="handleInputChange('valveOpeningArea', $event)"
-          min="0.1"
-          step="0.5"
+          min="10"
+          step="10"
           class="param-input"
         />
       </div>
@@ -193,8 +272,13 @@
       <h4 class="section-title">计算结果</h4>
 
       <div class="result-item">
-        <span class="result-label">单位时间送风量</span>
+        <span class="result-label">实际送风量</span>
         <span class="result-value">{{ result.airFlowRate.toFixed(2) }} mm³/s</span>
+      </div>
+
+      <div class="result-item">
+        <span class="result-label">有效送风量</span>
+        <span class="result-value">{{ result.effectiveFlowRate.toFixed(2) }} mm³/s</span>
       </div>
 
       <div class="result-item">
@@ -204,9 +288,14 @@
 
       <div class="result-item">
         <span class="result-label">送风效率</span>
-        <span :class="['result-value', { 'warning': result.efficiency < 30 }]">
+        <span :class="['result-value', { 'warning': result.efficiency < 40, 'danger': result.efficiency < 20 }]">
           {{ result.efficiency.toFixed(1) }}%
         </span>
+      </div>
+
+      <div class="result-item">
+        <span class="result-label">压力损失</span>
+        <span class="result-value">{{ result.pressureLoss.toFixed(2) }}%</span>
       </div>
 
       <div class="result-item">
@@ -221,9 +310,31 @@
         </span>
       </div>
 
+      <div class="result-item">
+        <span class="result-label">综合风险评分</span>
+        <span :class="['result-value', 'risk-level', getScoreClass(result.riskScore)]">
+          {{ result.riskScore.toFixed(1) }}
+        </span>
+      </div>
+
       <div v-if="result.isLeaking" class="leak-warning">
         <span class="warning-icon">⚠</span>
         <span>{{ result.leakWarning }}</span>
+      </div>
+    </div>
+
+    <div v-if="result.anomalies.length > 0" class="anomaly-section">
+      <h4 class="section-title anomaly-title">
+        <span class="anomaly-icon">⚡</span>
+        异常状态提示 ({{ result.anomalies.length }})
+      </h4>
+      <div
+        v-for="(anomaly, index) in result.anomalies"
+        :key="index"
+        :class="['anomaly-item', anomaly.level]"
+      >
+        <span class="anomaly-badge">{{ getAnomalyBadge(anomaly.type) }}</span>
+        <span class="anomaly-msg">{{ anomaly.message }}</span>
       </div>
     </div>
   </div>
@@ -242,7 +353,7 @@ const result = computed(() => store.result)
 function handleSliderChange(key: keyof BellowsParams, event: Event) {
   const target = event.target as HTMLInputElement
   const value = parseFloat(target.value)
-  if (value > 0) {
+  if (key === 'leakageRate' || key === 'loadPressure' || key === 'environmentalResistance' || value > 0) {
     store.updateParam(key, value as BellowsParams[typeof key])
   }
 }
@@ -251,9 +362,8 @@ function handleInputChange(key: keyof BellowsParams, event: Event) {
   const target = event.target as HTMLInputElement
   let value = parseFloat(target.value)
 
-  if (isNaN(value) || value <= 0) {
-    value = 1
-    target.value = '1'
+  if (isNaN(value) || value < 0) {
+    value = 0
   }
 
   if (key === 'valveStuckLevel') {
@@ -261,6 +371,13 @@ function handleInputChange(key: keyof BellowsParams, event: Event) {
   }
 
   store.updateParam(key, value as BellowsParams[typeof key])
+}
+
+function handlePercentageChange(key: keyof BellowsParams, event: Event) {
+  const target = event.target as HTMLInputElement
+  let value = parseFloat(target.value)
+  if (isNaN(value) || value < 0) value = 0
+  store.updateParam(key, (value / 100) as BellowsParams[typeof key])
 }
 
 function toggleValveStuck() {
@@ -271,6 +388,23 @@ function getRiskClass(risk: number): string {
   if (risk >= 0.7) return 'high'
   if (risk >= 0.4) return 'medium'
   return 'low'
+}
+
+function getScoreClass(score: number): string {
+  if (score >= 70) return 'high'
+  if (score >= 40) return 'medium'
+  return 'low'
+}
+
+function getAnomalyBadge(type: string): string {
+  const map: Record<string, string> = {
+    valve_stuck: '阀片',
+    leakage: '漏气',
+    high_frequency: '频率',
+    low_efficiency: '效率',
+    pressure_abnormal: '压力'
+  }
+  return map[type] || type
 }
 </script>
 
@@ -427,6 +561,10 @@ function getRiskClass(risk: number): string {
   color: #e67e22;
 }
 
+.result-value.danger {
+  color: #e74c3c;
+}
+
 .risk-level.low {
   color: #27ae60;
 }
@@ -454,5 +592,87 @@ function getRiskClass(risk: number): string {
 
 .warning-icon {
   font-size: 16px;
+}
+
+.anomaly-section {
+  margin-top: 16px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #f0e0e0;
+}
+
+.anomaly-title {
+  color: #c0392b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.anomaly-icon {
+  font-size: 16px;
+}
+
+.anomaly-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  border-left: 4px solid;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.anomaly-item:last-child {
+  margin-bottom: 0;
+}
+
+.anomaly-item.warning {
+  background: #fff8e1;
+  border-color: #f39c12;
+  color: #7d6608;
+}
+
+.anomaly-item.danger {
+  background: #ffebee;
+  border-color: #e74c3c;
+  color: #c62828;
+}
+
+.anomaly-item.info {
+  background: #e3f2fd;
+  border-color: #2196f3;
+  color: #1565c0;
+}
+
+.anomaly-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.08);
+  white-space: nowrap;
+}
+
+.anomaly-item.warning .anomaly-badge {
+  background: rgba(243, 156, 18, 0.15);
+  color: #b7791f;
+}
+
+.anomaly-item.danger .anomaly-badge {
+  background: rgba(231, 76, 60, 0.15);
+  color: #c0392b;
+}
+
+.anomaly-item.info .anomaly-badge {
+  background: rgba(33, 150, 243, 0.15);
+  color: #1565c0;
+}
+
+.anomaly-msg {
+  flex: 1;
 }
 </style>

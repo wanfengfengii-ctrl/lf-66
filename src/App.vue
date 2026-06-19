@@ -1,8 +1,8 @@
 <template>
   <div class="app-container">
     <header class="app-header">
-      <h1 class="app-title">双腔风箱送风效率模拟系统</h1>
-      <p class="app-subtitle">Dual-Chamber Bellows Air Supply Efficiency Simulator</p>
+      <h1 class="app-title">多工况风箱性能分析平台</h1>
+      <p class="app-subtitle">Multi-Condition Bellows Performance Analysis Platform</p>
     </header>
 
     <main class="app-main">
