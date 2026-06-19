@@ -148,13 +148,17 @@ const animationState = computed(() => store.animationState)
 const playbackSpeed = computed(() => store.playbackSpeed)
 
 const speedOptions = [0.25, 0.5, 1, 2, 4]
-const maxTimelineTime = 20
+const defaultTimelineTime = 20
 const timelineValue = ref(0)
 let isUserSeeking = false
 
+const maxTimelineTime = computed(() => {
+  return Math.max(defaultTimelineTime, Math.ceil(animationState.value.time * 10) / 10 + 1)
+})
+
 const timelineMarkers = computed(() => {
   const count = 5
-  return Array.from({ length: count + 1 }, (_, i) => (maxTimelineTime / count) * i)
+  return Array.from({ length: count + 1 }, (_, i) => (maxTimelineTime.value / count) * i)
 })
 
 let animationFrameId: number | null = null
@@ -563,7 +567,7 @@ function animate(currentTime: number) {
 
   if (!isUserSeeking) {
     store.updateAnimation(deltaTime)
-    timelineValue.value = animationState.value.time % maxTimelineTime
+    timelineValue.value = animationState.value.time
   }
 
   const ctx = canvasRef.value.getContext('2d')

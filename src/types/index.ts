@@ -53,10 +53,12 @@ export interface Scheme {
   timestamp: number
   animationState: AnimationState
   isPlaying: boolean
+  playbackSpeed: number
   airFlowHistory: AirFlowDataPoint[]
   pressureHistory: PressureDataPoint[]
   efficiencyHistory: EfficiencyDataPoint[]
   riskHistory: RiskDataPoint[]
+  lifespanEvaluation?: LifespanEvaluation
 }
 
 export interface AirFlowDataPoint {
@@ -78,4 +80,71 @@ export interface EfficiencyDataPoint {
 export interface RiskDataPoint {
   time: number
   riskScore: number
+}
+
+export interface ComponentLifespan {
+  componentName: string
+  componentKey: 'valve' | 'seal' | 'piston'
+  baseLifespanHours: number
+  remainingLifespanHours: number
+  wearRate: number
+  healthScore: number
+  riskLevel: 'normal' | 'warning' | 'danger'
+  thresholdHours: number
+}
+
+export interface LifespanTrendPoint {
+  operatingHours: number
+  valveHealth: number
+  sealHealth: number
+  pistonHealth: number
+  overallHealth: number
+}
+
+export interface MaintenanceAlert {
+  id: string
+  componentKey: 'valve' | 'seal' | 'piston'
+  componentName: string
+  level: 'info' | 'warning' | 'danger'
+  title: string
+  message: string
+  remainingHours: number
+  recommendedAction: string
+}
+
+export interface MaintenanceSuggestion {
+  component: string
+  urgency: 'low' | 'medium' | 'high' | 'critical'
+  action: string
+  schedule: string
+  estimatedCost: string
+  reason: string
+}
+
+export interface LifespanEvaluation {
+  components: ComponentLifespan[]
+  trendData: LifespanTrendPoint[]
+  maintenanceAlerts: MaintenanceAlert[]
+  suggestions: MaintenanceSuggestion[]
+  overallHealthScore: number
+  estimatedMaintenanceCycleHours: number
+  hasHighRisk: boolean
+  highRiskComponents: string[]
+  wearFactors: {
+    frequencyFactor: number
+    valveStuckFactor: number
+    loadPressureFactor: number
+    resistanceFactor: number
+    leakageFactor: number
+  }
+}
+
+export interface LifespanComparisonData {
+  schemeName: string
+  overallHealthScore: number
+  valveLifespanHours: number
+  sealLifespanHours: number
+  pistonLifespanHours: number
+  maintenanceCycleHours: number
+  hasHighRisk: boolean
 }

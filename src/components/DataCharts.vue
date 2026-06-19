@@ -37,13 +37,37 @@
         <p class="empty-compare-tip">勾选方案列表中的复选框即可添加到对比视图</p>
       </div>
       <div v-else class="comparison-charts">
-        <div class="chart-item full-width">
-          <div ref="compareFlowChartRef" class="chart tall"></div>
-          <p class="chart-label">多方案送风量对比 (柱状图)</p>
+        <div class="comparison-subtabs">
+          <button
+            v-for="subtab in comparisonSubtabs"
+            :key="subtab.key"
+            @click="comparisonSubtab = subtab.key"
+            :class="['comparison-subtab', { active: comparisonSubtab === subtab.key }]"
+          >
+            {{ subtab.label }}
+          </button>
         </div>
-        <div class="chart-item full-width">
-          <div ref="compareRadarChartRef" class="chart tall"></div>
-          <p class="chart-label">多方案综合性能对比 (雷达图)</p>
+
+        <div v-show="comparisonSubtab === 'summary'" class="comparison-summary">
+          <div class="chart-item full-width">
+            <div ref="compareFlowChartRef" class="chart tall"></div>
+            <p class="chart-label">多方案送风量对比 (柱状图)</p>
+          </div>
+          <div class="chart-item full-width">
+            <div ref="compareRadarChartRef" class="chart tall"></div>
+            <p class="chart-label">多方案综合性能对比 (雷达图)</p>
+          </div>
+        </div>
+
+        <div v-show="comparisonSubtab === 'history'" class="comparison-history">
+          <div class="chart-item full-width">
+            <div ref="compareHistoryFlowRef" class="chart tall"></div>
+            <p class="chart-label">多方案送风量历史趋势对比</p>
+          </div>
+          <div class="chart-item full-width">
+            <div ref="compareHistoryEffRef" class="chart tall"></div>
+            <p class="chart-label">多方案效率 & 风险历史趋势对比</p>
+          </div>
         </div>
       </div>
     </div>
@@ -107,6 +131,12 @@ const chartTabs = [
 ]
 const activeTab = ref('overview')
 
+const comparisonSubtabs = [
+  { key: 'summary', label: '📊 汇总对比' },
+  { key: 'history', label: '📈 历史趋势' }
+]
+const comparisonSubtab = ref('summary')
+
 const result = computed(() => store.result)
 const selectedSchemes = computed(() => store.selectedSchemes)
 
@@ -116,6 +146,8 @@ const efficiencyChartRef = ref<HTMLDivElement | null>(null)
 const riskChartRef = ref<HTMLDivElement | null>(null)
 const compareFlowChartRef = ref<HTMLDivElement | null>(null)
 const compareRadarChartRef = ref<HTMLDivElement | null>(null)
+const compareHistoryFlowRef = ref<HTMLDivElement | null>(null)
+const compareHistoryEffRef = ref<HTMLDivElement | null>(null)
 const gaugeChartRef = ref<HTMLDivElement | null>(null)
 
 let flowChart: echarts.ECharts | null = null
@@ -124,6 +156,8 @@ let efficiencyChart: echarts.ECharts | null = null
 let riskChart: echarts.ECharts | null = null
 let compareFlowChart: echarts.ECharts | null = null
 let compareRadarChart: echarts.ECharts | null = null
+let compareHistoryFlowChart: echarts.ECharts | null = null
+let compareHistoryEffChart: echarts.ECharts | null = null
 let gaugeChart: echarts.ECharts | null = null
 
 const comparisonColors = ['#4a90d9', '#e67e22', '#27ae60', '#8e44ad', '#d35400']
@@ -277,6 +311,16 @@ function initCompareRadarChart() {
   compareRadarChart = echarts.init(compareRadarChartRef.value)
 }
 
+function initCompareHistoryFlowChart() {
+  if (!compareHistoryFlowRef.value) return
+  compareHistoryFlowChart = echarts.init(compareHistoryFlowRef.value)
+}
+
+function initCompareHistoryEffChart() {
+  if (!compareHistoryEffRef.value) return
+  compareHistoryEffChart = echarts.init(compareHistoryEffRef.value)
+}
+
 function initGaugeChart() {
   if (!gaugeChartRef.value) return
   gaugeChart = echarts.init(gaugeChartRef.value)
@@ -427,6 +471,107 @@ function updateComparisonCharts() {
   }
 
   compareRadarChart.setOption(radarOption, true)
+
+  updateComparisonHistoryCharts()
+}
+
+function updateComparisonHistoryCharts() {
+  if (!compareHistoryFlowChart || selectedSchemes.value.length < 2) return
+
+  const schemes: Scheme[] = selectedSchemes.value
+
+  const flowSeries = schemes.map((scheme, idx) => {
+    const data = scheme.airFlowHistory?.map(p => [p.time, p.flowRate]) || []
+    return {
+      name: scheme.name,
+      type: 'line',
+      data,
+      smooth: true,
+      lineStyle: { color: comparisonColors[idx % comparisonColors.length], width: 2 },
+      itemStyle: { color: comparisonColors[idx % comparisonColors.length] },
+      showSymbol: false
+    }
+  })
+
+  const flowOption: echarts.EChartsOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        let html = `时间: ${params[0]?.value?.[0]?.toFixed(2)}s<br/>`
+        params.forEach((p: any) => {
+          html += `${p.seriesName}: ${p.value[1]?.toFixed(0)} mm³/s<br/>`
+        })
+        return html
+      }
+    },
+    legend: {
+      data: schemes.map(s => s.name),
+      top: 0,
+      textStyle: { fontSize: 11 }
+    },
+    grid: { left: 55, right: 20, top: 35, bottom: 30 },
+    xAxis: { type: 'value', name: '时间(s)', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 9 } },
+    yAxis: { type: 'value', name: '风量(mm³/s)', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 9 } },
+    series: flowSeries as any
+  }
+  compareHistoryFlowChart.setOption(flowOption, true)
+
+  if (!compareHistoryEffChart) return
+
+  const effSeries: any[] = []
+  schemes.forEach((scheme, idx) => {
+    const effData = scheme.efficiencyHistory?.map(p => [p.time, p.efficiency]) || []
+    effSeries.push({
+      name: `${scheme.name} - 效率`,
+      type: 'line',
+      data: effData,
+      smooth: true,
+      lineStyle: { color: comparisonColors[idx % comparisonColors.length], width: 2 },
+      itemStyle: { color: comparisonColors[idx % comparisonColors.length] },
+      showSymbol: false,
+      yAxisIndex: 0
+    })
+    const riskData = scheme.riskHistory?.map(p => [p.time, p.riskScore]) || []
+    effSeries.push({
+      name: `${scheme.name} - 风险`,
+      type: 'line',
+      data: riskData,
+      smooth: true,
+      lineStyle: { color: comparisonColors[idx % comparisonColors.length], width: 2, type: 'dashed' },
+      itemStyle: { color: comparisonColors[idx % comparisonColors.length] },
+      showSymbol: false,
+      yAxisIndex: 1
+    })
+  })
+
+  const effOption: echarts.EChartsOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        let html = `时间: ${params[0]?.value?.[0]?.toFixed(2)}s<br/>`
+        params.forEach((p: any) => {
+          const unit = p.seriesName.includes('效率') ? '%' : '分'
+          html += `${p.seriesName}: ${p.value[1]?.toFixed(1)}${unit}<br/>`
+        })
+        return html
+      }
+    },
+    legend: {
+      data: effSeries.map(s => s.name),
+      top: 0,
+      textStyle: { fontSize: 10 }
+    },
+    grid: { left: 55, right: 55, top: 40, bottom: 30 },
+    xAxis: { type: 'value', name: '时间(s)', nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 9 } },
+    yAxis: [
+      { type: 'value', name: '效率(%)', min: 0, max: 100, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 9 } },
+      { type: 'value', name: '风险评分', min: 0, max: 100, nameTextStyle: { fontSize: 10 }, axisLabel: { fontSize: 9 } }
+    ],
+    series: effSeries
+  }
+  compareHistoryEffChart.setOption(effOption, true)
 }
 
 function updateGaugeChart() {
@@ -488,6 +633,8 @@ function handleResize() {
   riskChart?.resize()
   compareFlowChart?.resize()
   compareRadarChart?.resize()
+  compareHistoryFlowChart?.resize()
+  compareHistoryEffChart?.resize()
   gaugeChart?.resize()
 }
 
@@ -516,6 +663,13 @@ watch(activeTab, (newVal) => {
   }, 50)
 })
 
+watch(comparisonSubtab, () => {
+  setTimeout(() => {
+    handleResize()
+    updateComparisonCharts()
+  }, 50)
+})
+
 onMounted(() => {
   initFlowChart()
   initPressureChart()
@@ -523,6 +677,8 @@ onMounted(() => {
   initRiskChart()
   initCompareFlowChart()
   initCompareRadarChart()
+  initCompareHistoryFlowChart()
+  initCompareHistoryEffChart()
   initGaugeChart()
   setTimeout(() => {
     updateRealtimeCharts()
@@ -540,6 +696,8 @@ onUnmounted(() => {
   riskChart?.dispose()
   compareFlowChart?.dispose()
   compareRadarChart?.dispose()
+  compareHistoryFlowChart?.dispose()
+  compareHistoryEffChart?.dispose()
   gaugeChart?.dispose()
   window.removeEventListener('resize', handleResize)
 })
@@ -582,6 +740,44 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #4a90d9, #357abd);
   color: white;
   box-shadow: 0 2px 8px rgba(74, 144, 217, 0.3);
+}
+
+.comparison-subtabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.comparison-subtab {
+  padding: 6px 14px;
+  border: 1px solid #d0d7de;
+  border-radius: 16px;
+  background: white;
+  color: #666;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.comparison-subtab:hover {
+  background: #f0f4f8;
+  color: #2980b9;
+}
+
+.comparison-subtab.active {
+  background: #e8f4f8;
+  color: #2980b9;
+  border-color: #4a90d9;
+}
+
+.comparison-summary,
+.comparison-history {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
 }
 
 .charts-grid {

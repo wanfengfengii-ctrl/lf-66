@@ -9,7 +9,12 @@ import type {
   PressureDataPoint,
   AnomalyInfo,
   EfficiencyDataPoint,
-  RiskDataPoint
+  RiskDataPoint,
+  LifespanEvaluation,
+  ComponentLifespan,
+  LifespanTrendPoint,
+  MaintenanceAlert,
+  MaintenanceSuggestion
 } from '@/types'
 
 const LEAK_THRESHOLD = 0.3
@@ -19,6 +24,14 @@ const HIGH_FREQ_THRESHOLD = 6
 const HIGH_FLUCTUATION_THRESHOLD = 30
 const LOW_EFFICIENCY_THRESHOLD = 40
 const RISK_PRESSURE_ABNORMAL = 1.6
+
+const BASE_VALVE_LIFESPAN = 8000
+const BASE_SEAL_LIFESPAN = 12000
+const BASE_PISTON_LIFESPAN = 15000
+const WARNING_LIFESPAN_RATIO = 0.3
+const DANGER_LIFESPAN_RATIO = 0.15
+const LIFESPAN_TREND_POINTS = 20
+const LIFESPAN_TREND_RANGE_HOURS = 10000
 
 function loadSchemesFromStorage(): Scheme[] {
   try {
@@ -270,6 +283,257 @@ export const useBellowsStore = defineStore('bellows', () => {
     }
   })
 
+  const wearFactors = computed(() => {
+    const freq = params.value.rodFrequency
+    const frequencyFactor = 1 + Math.max(0, freq - 2) * 0.15 + Math.pow(Math.max(0, freq - 6), 2) * 0.08
+
+    const valveStuckFactor = params.value.valveStuck
+      ? 1 + params.value.valveStuckLevel * 3.5
+      : 1
+
+    const load = params.value.loadPressure
+    const loadPressureFactor = 1 + load * 0.6 + Math.pow(load, 2) * 0.2
+
+    const resistance = params.value.environmentalResistance
+    const resistanceFactor = 1 + resistance * 0.8
+
+    const leakage = params.value.leakageRate
+    const leakageFactor = 1 + leakage * 0.08 + Math.pow(Math.max(0, leakage - 10), 2) * 0.005
+
+    return {
+      frequencyFactor,
+      valveStuckFactor,
+      loadPressureFactor,
+      resistanceFactor,
+      leakageFactor
+    }
+  })
+
+  function computeComponentLifespan(
+    key: 'valve' | 'seal' | 'piston',
+    name: string,
+    baseLifespan: number,
+    wf: typeof wearFactors.value
+  ): ComponentLifespan {
+    let wearMultiplier = 1
+
+    switch (key) {
+      case 'valve':
+        wearMultiplier = wf.frequencyFactor * wf.valveStuckFactor * (1 + wf.loadPressureFactor * 0.1)
+        break
+      case 'seal':
+        wearMultiplier = wf.leakageFactor * wf.loadPressureFactor * (1 + wf.frequencyFactor * 0.15)
+        break
+      case 'piston':
+        wearMultiplier = wf.frequencyFactor * wf.loadPressureFactor * wf.resistanceFactor * (1 + wf.leakageFactor * 0.1)
+        break
+    }
+
+    const wearRate = (1 / baseLifespan) * wearMultiplier
+    const remainingLifespanHours = baseLifespan / wearMultiplier
+    const healthScore = Math.max(0, Math.min(100, (remainingLifespanHours / baseLifespan) * 100))
+
+    const thresholdHours = baseLifespan * WARNING_LIFESPAN_RATIO
+    let riskLevel: 'normal' | 'warning' | 'danger' = 'normal'
+    if (remainingLifespanHours <= baseLifespan * DANGER_LIFESPAN_RATIO) {
+      riskLevel = 'danger'
+    } else if (remainingLifespanHours <= thresholdHours) {
+      riskLevel = 'warning'
+    }
+
+    return {
+      componentName: name,
+      componentKey: key,
+      baseLifespanHours: baseLifespan,
+      remainingLifespanHours: Math.round(remainingLifespanHours),
+      wearRate: wearRate * 1000,
+      healthScore: Math.round(healthScore * 10) / 10,
+      riskLevel,
+      thresholdHours: Math.round(thresholdHours)
+    }
+  }
+
+  function generateLifespanTrendData(components: ComponentLifespan[]): LifespanTrendPoint[] {
+    const valve = components.find(c => c.componentKey === 'valve')!
+    const seal = components.find(c => c.componentKey === 'seal')!
+    const piston = components.find(c => c.componentKey === 'piston')!
+
+    const data: LifespanTrendPoint[] = []
+    const stepHours = LIFESPAN_TREND_RANGE_HOURS / LIFESPAN_TREND_POINTS
+
+    for (let i = 0; i <= LIFESPAN_TREND_POINTS; i++) {
+      const operatingHours = i * stepHours
+      const valveHealth = Math.max(0, 100 - (operatingHours / valve.baseLifespanHours) * 100 * (100 / valve.healthScore))
+      const sealHealth = Math.max(0, 100 - (operatingHours / seal.baseLifespanHours) * 100 * (100 / seal.healthScore))
+      const pistonHealth = Math.max(0, 100 - (operatingHours / piston.baseLifespanHours) * 100 * (100 / piston.healthScore))
+      const overallHealth = (valveHealth * 0.4 + sealHealth * 0.35 + pistonHealth * 0.25)
+
+      data.push({
+        operatingHours: Math.round(operatingHours),
+        valveHealth: Math.round(valveHealth * 10) / 10,
+        sealHealth: Math.round(sealHealth * 10) / 10,
+        pistonHealth: Math.round(pistonHealth * 10) / 10,
+        overallHealth: Math.round(overallHealth * 10) / 10
+      })
+    }
+
+    return data
+  }
+
+  function generateMaintenanceAlerts(components: ComponentLifespan[]): MaintenanceAlert[] {
+    const alerts: MaintenanceAlert[] = []
+
+    components.forEach((comp) => {
+      if (comp.riskLevel === 'danger') {
+        alerts.push({
+          id: `alert_${comp.componentKey}_danger`,
+          componentKey: comp.componentKey,
+          componentName: comp.componentName,
+          level: 'danger',
+          title: `${comp.componentName}紧急更换预警`,
+          message: `剩余寿命仅约 ${comp.remainingLifespanHours} 小时，已低于安全阈值的15%。建议立即停机更换，避免运行故障。`,
+          remainingHours: comp.remainingLifespanHours,
+          recommendedAction: '立即停机更换'
+        })
+      } else if (comp.riskLevel === 'warning') {
+        alerts.push({
+          id: `alert_${comp.componentKey}_warning`,
+          componentKey: comp.componentKey,
+          componentName: comp.componentName,
+          level: 'warning',
+          title: `${comp.componentName}维护提醒`,
+          message: `剩余寿命约 ${comp.remainingLifespanHours} 小时，已进入预警区间。请安排近期维护计划。`,
+          remainingHours: comp.remainingLifespanHours,
+          recommendedAction: '近期安排维护更换'
+        })
+      } else if (comp.healthScore < 80) {
+        alerts.push({
+          id: `alert_${comp.componentKey}_info`,
+          componentKey: comp.componentKey,
+          componentName: comp.componentName,
+          level: 'info',
+          title: `${comp.componentName}状态关注`,
+          message: `剩余寿命约 ${comp.remainingLifespanHours} 小时，状态良好，建议继续定期检查。`,
+          remainingHours: comp.remainingLifespanHours,
+          recommendedAction: '定期检查维护'
+        })
+      }
+    })
+
+    alerts.sort((a, b) => {
+      const levelOrder: Record<string, number> = { danger: 0, warning: 1, info: 2 }
+      return levelOrder[a.level] - levelOrder[b.level] || a.remainingHours - b.remainingHours
+    })
+
+    return alerts
+  }
+
+  function generateMaintenanceSuggestions(
+    components: ComponentLifespan[],
+    wf: typeof wearFactors.value
+  ): MaintenanceSuggestion[] {
+    const suggestions: MaintenanceSuggestion[] = []
+
+    components.forEach((comp) => {
+      let urgency: 'low' | 'medium' | 'high' | 'critical'
+      let action: string
+      let schedule: string
+      let cost: string
+
+      switch (comp.riskLevel) {
+        case 'danger':
+          urgency = 'critical'
+          action = `立即更换${comp.componentName}组件`
+          schedule = '立即执行'
+          cost = comp.componentKey === 'piston' ? '¥800-1500' : comp.componentKey === 'seal' ? '¥200-500' : '¥300-600'
+          break
+        case 'warning':
+          urgency = 'high'
+          action = `安排更换${comp.componentName}组件`
+          schedule = `未来 ${Math.round(comp.remainingLifespanHours / 24 / 7)} 周内`
+          cost = comp.componentKey === 'piston' ? '¥800-1500' : comp.componentKey === 'seal' ? '¥200-500' : '¥300-600'
+          break
+        default:
+          if (comp.healthScore < 60) {
+            urgency = 'medium'
+            action = `制定${comp.componentName}预防性维护计划`
+            schedule = `未来 ${Math.round(comp.remainingLifespanHours / 24 / 30)} 个月内`
+            cost = comp.componentKey === 'piston' ? '¥500-1000' : comp.componentKey === 'seal' ? '¥150-300' : '¥200-400'
+          } else {
+            urgency = 'low'
+            action = `${comp.componentName}例行检查与清洁`
+            schedule = '下次常规维护时'
+            cost = comp.componentKey === 'piston' ? '¥100-300' : comp.componentKey === 'seal' ? '¥50-150' : '¥80-200'
+          }
+      }
+
+      let reason = `当前磨损速率：${comp.wearRate.toFixed(4)}‰/h`
+      if (comp.componentKey === 'valve') {
+        if (wf.valveStuckFactor > 1.5) reason += '，阀片卡滞加速磨损'
+        if (wf.frequencyFactor > 1.5) reason += '，高频运行加剧疲劳'
+      } else if (comp.componentKey === 'seal') {
+        if (wf.leakageFactor > 1.5) reason += '，漏气现象加速密封老化'
+        if (wf.loadPressureFactor > 1.5) reason += '，高负载压力造成挤压变形'
+      } else {
+        if (wf.frequencyFactor > 1.5) reason += '，高频往复加剧摩擦损耗'
+        if (wf.loadPressureFactor > 1.5) reason += '，高压环境加速活塞环磨损'
+      }
+
+      suggestions.push({
+        component: comp.componentName,
+        urgency,
+        action,
+        schedule,
+        estimatedCost: cost,
+        reason
+      })
+    })
+
+    const urgencyOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+    suggestions.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency])
+
+    return suggestions
+  }
+
+  const lifespanEvaluation = computed<LifespanEvaluation>(() => {
+    const wf = wearFactors.value
+
+    const components: ComponentLifespan[] = [
+      computeComponentLifespan('valve', '阀片组件', BASE_VALVE_LIFESPAN, wf),
+      computeComponentLifespan('seal', '密封件', BASE_SEAL_LIFESPAN, wf),
+      computeComponentLifespan('piston', '活塞组件', BASE_PISTON_LIFESPAN, wf)
+    ]
+
+    const trendData = generateLifespanTrendData(components)
+    const maintenanceAlerts = generateMaintenanceAlerts(components)
+    const suggestions = generateMaintenanceSuggestions(components, wf)
+
+    const overallHealthScore = Math.round(
+      (components[0].healthScore * 0.4 + components[1].healthScore * 0.35 + components[2].healthScore * 0.25) * 10
+    ) / 10
+
+    const estimatedMaintenanceCycleHours = Math.round(
+      Math.min(...components.map(c => c.remainingLifespanHours)) * 0.85
+    )
+
+    const hasHighRisk = components.some(c => c.riskLevel === 'danger' || c.riskLevel === 'warning')
+    const highRiskComponents = components
+      .filter(c => c.riskLevel === 'danger' || c.riskLevel === 'warning')
+      .map(c => c.componentName)
+
+    return {
+      components,
+      trendData,
+      maintenanceAlerts,
+      suggestions,
+      overallHealthScore,
+      estimatedMaintenanceCycleHours,
+      hasHighRisk,
+      highRiskComponents,
+      wearFactors: wf
+    }
+  })
+
   function computeStateAtTime(targetTime: number) {
     const omega = 2 * Math.PI * params.value.rodFrequency
     const stroke = params.value.pistonStroke / 2
@@ -465,10 +729,12 @@ export const useBellowsStore = defineStore('bellows', () => {
       timestamp: Date.now(),
       animationState: deepClone(animationState.value),
       isPlaying: isPlaying.value,
+      playbackSpeed: playbackSpeed.value,
       airFlowHistory: deepClone(airFlowHistory.value),
       pressureHistory: deepClone(pressureHistory.value),
       efficiencyHistory: deepClone(efficiencyHistory.value),
-      riskHistory: deepClone(riskHistory.value)
+      riskHistory: deepClone(riskHistory.value),
+      lifespanEvaluation: deepClone(lifespanEvaluation.value)
     }
     schemes.value.push(scheme)
     saveSchemesToStorage(schemes.value)
@@ -493,13 +759,17 @@ export const useBellowsStore = defineStore('bellows', () => {
       params.value = deepClone(scheme.params)
       animationState.value = deepClone(scheme.animationState)
       isPlaying.value = scheme.isPlaying
-      airFlowHistory.value = deepClone(scheme.airFlowHistory)
-      pressureHistory.value = deepClone(scheme.pressureHistory)
+      playbackSpeed.value = scheme.playbackSpeed ?? 1
+      airFlowHistory.value = deepClone(scheme.airFlowHistory || [])
+      pressureHistory.value = deepClone(scheme.pressureHistory || [])
       efficiencyHistory.value = deepClone(scheme.efficiencyHistory || [])
       riskHistory.value = deepClone(scheme.riskHistory || [])
 
       animationState.value = computeStateAtTime(animationState.value.time)
-      generateFullHistory()
+
+      if (airFlowHistory.value.length === 0) {
+        generateFullHistory()
+      }
     }
   }
 
@@ -555,6 +825,8 @@ export const useBellowsStore = defineStore('bellows', () => {
     theoreticalMaxFlow,
     valveFlowCoefficient,
     result,
+    lifespanEvaluation,
+    wearFactors,
     selectedSchemes,
     updateAnimation,
     resetAnimation,
