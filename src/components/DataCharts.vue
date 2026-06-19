@@ -9,6 +9,13 @@
       >
         {{ tab.label }}
       </button>
+      <div v-if="lifespanEvaluation.hasHighRisk" class="tab-risk-indicator" title="存在高风险部件">
+        ⚠️ {{ lifespanEvaluation.highRiskComponents.length }}
+      </div>
+    </div>
+
+    <div v-show="activeTab === 'lifespan'" class="lifespan-view">
+      <LifespanPrediction />
     </div>
 
     <div v-show="activeTab === 'realtime'" class="charts-grid">
@@ -121,15 +128,19 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import * as echarts from 'echarts'
 import { useBellowsStore } from '@/stores/bellows'
 import type { Scheme } from '@/types'
+import LifespanPrediction from './LifespanPrediction.vue'
 
 const store = useBellowsStore()
 
 const chartTabs = [
   { key: 'overview', label: '📈 总览' },
   { key: 'realtime', label: '📊 实时趋势' },
+  { key: 'lifespan', label: '🔧 寿命与维护' },
   { key: 'comparison', label: '🆚 方案对比' }
 ]
 const activeTab = ref('overview')
+
+const lifespanEvaluation = computed(() => store.lifespanEvaluation)
 
 const comparisonSubtabs = [
   { key: 'summary', label: '📊 汇总对比' },
@@ -717,6 +728,27 @@ onUnmounted(() => {
   margin-bottom: 16px;
   justify-content: center;
   flex-wrap: wrap;
+  align-items: center;
+}
+
+.tab-risk-indicator {
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(231, 76, 60, 0.3);
+  animation: risk-pulse 2s ease-in-out infinite;
+}
+
+@keyframes risk-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.lifespan-view {
+  width: 100%;
 }
 
 .chart-tab {
