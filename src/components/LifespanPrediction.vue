@@ -1,9 +1,15 @@
 <template>
   <div class="lifespan-container">
-    <div v-if="lifespanEvaluation.hasHighRisk" class="high-risk-banner">
+    <div v-if="lifespanEvaluation.hasHighRisk" class="high-risk-banner danger">
       <span class="banner-icon">🚨</span>
       <span class="banner-text">
-        <strong>高风险预警：</strong>{{ lifespanEvaluation.highRiskComponents.join('、') }} 已进入危险区间，请立即处理！
+        <strong>紧急风险：</strong>{{ lifespanEvaluation.highRiskComponents.join('、') }} 剩余寿命不足15%，建议立即停机更换！
+      </span>
+    </div>
+    <div v-else-if="lifespanEvaluation.hasWarning" class="high-risk-banner warning">
+      <span class="banner-icon">⚠️</span>
+      <span class="banner-text">
+        <strong>维护提醒：</strong>{{ lifespanEvaluation.warningComponents.join('、') }} 已进入预警区间(剩余寿命15%-30%)，请安排近期维护。
       </span>
     </div>
 
@@ -245,6 +251,10 @@
         <p class="empty-compare-tip">勾选方案列表中的复选框即可添加到对比视图</p>
       </div>
       <div v-else class="comparison-content">
+        <div class="compare-hint">
+          <span class="hint-icon">ℹ️</span>
+          <span class="hint-text">提示：升级前保存的旧方案将按其保存参数自动计算寿命数据，用于对比参考。</span>
+        </div>
         <div class="chart-item full-width">
           <div ref="compareHealthRadarRef" class="chart tall"></div>
           <p class="chart-label">多方案部件健康度对比（雷达图）</p>
@@ -267,27 +277,30 @@
                   <th>密封件寿命</th>
                   <th>活塞寿命</th>
                   <th>维护周期</th>
-                  <th>高风险</th>
+                  <th>风险状态</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(scheme, idx) in selectedSchemesWithLifespan" :key="scheme.id">
+                <tr v-for="(scheme, idx) in computedForComparison" :key="scheme.id">
                   <td :class="['scheme-name-cell']">
                     <span class="color-dot" :style="{ background: comparisonColors[idx % comparisonColors.length] }"></span>
                     {{ scheme.name }}
                   </td>
-                  <td :class="getHealthTableClass(scheme.lifespanEvaluation?.overallHealthScore ?? 0)">
-                    {{ scheme.lifespanEvaluation?.overallHealthScore.toFixed(1) ?? '-' }}%
+                  <td :class="getHealthTableClass(scheme.lifespanEvaluation.overallHealthScore)">
+                    {{ scheme.lifespanEvaluation.overallHealthScore.toFixed(1) }}%
                   </td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation?.components[0].remainingLifespanHours ?? 0) }}</td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation?.components[1].remainingLifespanHours ?? 0) }}</td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation?.components[2].remainingLifespanHours ?? 0) }}</td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation?.estimatedMaintenanceCycleHours ?? 0) }}</td>
+                  <td>{{ formatHours(scheme.lifespanEvaluation.components[0].remainingLifespanHours) }}</td>
+                  <td>{{ formatHours(scheme.lifespanEvaluation.components[1].remainingLifespanHours) }}</td>
+                  <td>{{ formatHours(scheme.lifespanEvaluation.components[2].remainingLifespanHours) }}</td>
+                  <td>{{ formatHours(scheme.lifespanEvaluation.estimatedMaintenanceCycleHours) }}</td>
                   <td>
-                    <span v-if="scheme.lifespanEvaluation?.hasHighRisk" class="high-risk-tag">
-                      ⚠ {{ scheme.lifespanEvaluation?.highRiskComponents.length }}个
+                    <span v-if="scheme.lifespanEvaluation.hasHighRisk" class="high-risk-tag">
+                      🚨 紧急 {{ scheme.lifespanEvaluation.highRiskComponents.length }}个
                     </span>
-                    <span v-else class="no-risk-tag">✅ 无</span>
+                    <span v-else-if="scheme.lifespanEvaluation.hasWarning" class="warning-tag">
+                      ⚠️ 预警 {{ scheme.lifespanEvaluation.warningComponents.length }}个
+                    </span>
+                    <span v-else class="no-risk-tag">✅ 正常</span>
                   </td>
                 </tr>
               </tbody>
@@ -331,8 +344,13 @@ let componentLifespanBarChart: echarts.ECharts | null = null
 let compareHealthRadarChart: echarts.ECharts | null = null
 let compareLifespanBarChart: echarts.ECharts | null = null
 
-const selectedSchemesWithLifespan = computed(() => {
-  return selectedSchemes.value.filter(s => s.lifespanEvaluation != null) as (Scheme & { lifespanEvaluation: NonNullable<Scheme['lifespanEvaluation']> })[]
+const computedForComparison = computed(() => {
+  const computedSchemes: (Scheme & { lifespanEvaluation: NonNullable<Scheme['lifespanEvaluation']> })[] = []
+  selectedSchemes.value.forEach(s => {
+    store.ensureSchemeLifespan(s)
+    computedSchemes.push(s as Scheme & { lifespanEvaluation: NonNullable<Scheme['lifespanEvaluation']> })
+  })
+  return computedSchemes
 })
 
 function formatHours(hours: number): string {
@@ -684,7 +702,7 @@ function updateComponentLifespanBar() {
 }
 
 function updateComparisonCharts() {
-  const schemes = selectedSchemesWithLifespan.value
+  const schemes = computedForComparison.value
   if (schemes.length < 2) return
 
   if (compareHealthRadarChart) {
@@ -873,15 +891,34 @@ onUnmounted(() => {
   gap: 10px;
   padding: 12px 16px;
   margin-bottom: 16px;
-  background: linear-gradient(90deg, #fee, #fff5f5);
-  border: 2px solid #e74c3c;
   border-radius: 10px;
+  border: 2px solid;
+}
+
+.high-risk-banner.danger {
+  background: linear-gradient(90deg, #fee, #fff5f5);
+  border-color: #e74c3c;
   animation: pulse-danger 2s ease-in-out infinite;
+}
+
+.high-risk-banner.warning {
+  background: linear-gradient(90deg, #fff8e1, #fffdf5);
+  border-color: #f39c12;
+  animation: pulse-warning 2.5s ease-in-out infinite;
 }
 
 @keyframes pulse-danger {
   0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
   50% { box-shadow: 0 0 0 8px rgba(231, 76, 60, 0); }
+}
+
+@keyframes pulse-warning {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.3); }
+  50% { box-shadow: 0 0 0 8px rgba(243, 156, 18, 0); }
+}
+
+.high-risk-banner.warning .banner-text {
+  color: #b7791f;
 }
 
 .banner-icon {
@@ -1680,6 +1717,38 @@ onUnmounted(() => {
   color: #27ae60;
   font-size: 10px;
   font-weight: 600;
+}
+
+.warning-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #fef3e2;
+  color: #e67e22;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.compare-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  background: #eaf4fd;
+  border: 1px solid #b8dff7;
+  border-radius: 8px;
+}
+
+.hint-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.hint-text {
+  font-size: 12px;
+  color: #2980b9;
+  line-height: 1.5;
 }
 
 @media (max-width: 900px) {

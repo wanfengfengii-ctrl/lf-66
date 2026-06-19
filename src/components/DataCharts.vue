@@ -9,8 +9,19 @@
       >
         {{ tab.label }}
       </button>
-      <div v-if="lifespanEvaluation.hasHighRisk" class="tab-risk-indicator" title="存在高风险部件">
-        ⚠️ {{ lifespanEvaluation.highRiskComponents.length }}
+      <div
+        v-if="lifespanEvaluation.hasHighRisk"
+        class="tab-risk-indicator danger"
+        title="存在紧急风险部件，建议立即处理"
+      >
+        🚨 {{ lifespanEvaluation.highRiskComponents.length }}
+      </div>
+      <div
+        v-else-if="lifespanEvaluation.hasWarning"
+        class="tab-risk-indicator warning"
+        title="存在预警级部件，请安排维护"
+      >
+        ⚠️ {{ lifespanEvaluation.warningComponents.length }}
       </div>
     </div>
 
@@ -733,18 +744,35 @@ onUnmounted(() => {
 
 .tab-risk-indicator {
   padding: 4px 10px;
-  background: linear-gradient(135deg, #ff6b6b, #ee5a52);
-  color: white;
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
-  box-shadow: 0 2px 6px rgba(231, 76, 60, 0.3);
-  animation: risk-pulse 2s ease-in-out infinite;
+  cursor: pointer;
+  transition: transform 0.2s;
 }
 
-@keyframes risk-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.05); }
+.tab-risk-indicator.danger {
+  background: linear-gradient(135deg, #ff6b6b, #ee5a52);
+  color: white;
+  box-shadow: 0 2px 6px rgba(231, 76, 60, 0.3);
+  animation: risk-pulse-danger 2s ease-in-out infinite;
+}
+
+.tab-risk-indicator.warning {
+  background: linear-gradient(135deg, #f39c12, #e67e22);
+  color: white;
+  box-shadow: 0 2px 6px rgba(243, 156, 18, 0.3);
+  animation: risk-pulse-warning 2.5s ease-in-out infinite;
+}
+
+@keyframes risk-pulse-danger {
+  0%, 100% { transform: scale(1); box-shadow: 0 2px 6px rgba(231, 76, 60, 0.3); }
+  50% { transform: scale(1.06); box-shadow: 0 3px 10px rgba(231, 76, 60, 0.5); }
+}
+
+@keyframes risk-pulse-warning {
+  0%, 100% { transform: scale(1); box-shadow: 0 2px 6px rgba(243, 156, 18, 0.3); }
+  50% { transform: scale(1.04); box-shadow: 0 3px 10px rgba(243, 156, 18, 0.45); }
 }
 
 .lifespan-view {

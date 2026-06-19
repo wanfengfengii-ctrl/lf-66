@@ -130,6 +130,8 @@ export interface LifespanEvaluation {
   estimatedMaintenanceCycleHours: number
   hasHighRisk: boolean
   highRiskComponents: string[]
+  hasWarning: boolean
+  warningComponents: string[]
   wearFactors: {
     frequencyFactor: number
     valveStuckFactor: number
