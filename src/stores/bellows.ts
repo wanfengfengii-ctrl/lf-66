@@ -14,7 +14,17 @@ import type {
   ComponentLifespan,
   LifespanTrendPoint,
   MaintenanceAlert,
-  MaintenanceSuggestion
+  MaintenanceSuggestion,
+  MaintenanceRecord,
+  MaintenanceType,
+  MaintenanceComponent,
+  MaintenanceCostStats,
+  MaintenanceCostTrendPoint,
+  ComponentReplacementHistory,
+  MaintenanceCycleDeviationPoint,
+  MaintenanceCycleAnalysis,
+  CalendarEvent,
+  SchemeMaintenanceComparison
 } from '@/types'
 
 const LEAK_THRESHOLD = 0.3
@@ -32,6 +42,29 @@ const WARNING_LIFESPAN_RATIO = 0.3
 const DANGER_LIFESPAN_RATIO = 0.15
 const LIFESPAN_TREND_POINTS = 20
 const LIFESPAN_TREND_RANGE_HOURS = 10000
+
+const MAINTENANCE_TYPE_LABELS: Record<MaintenanceType, string> = {
+  inspection: '例行检查',
+  valve_replacement: '更换阀片',
+  seal_replacement: '更换密封件',
+  piston_replacement: '更换活塞组件',
+  other: '其他维护'
+}
+
+const COMPONENT_NAMES: Record<MaintenanceComponent, string> = {
+  valve: '阀片组件',
+  seal: '密封件',
+  piston: '活塞组件',
+  system: '系统整体'
+}
+
+const LIFESPAN_RESTORE_RATIO: Record<MaintenanceType, number> = {
+  inspection: 0.05,
+  valve_replacement: 0.95,
+  seal_replacement: 0.9,
+  piston_replacement: 0.92,
+  other: 0.1
+}
 
 function loadSchemesFromStorage(): Scheme[] {
   try {
@@ -92,6 +125,10 @@ export const useBellowsStore = defineStore('bellows', () => {
   const efficiencyHistory = ref<EfficiencyDataPoint[]>([])
   const riskHistory = ref<RiskDataPoint[]>([])
   const playbackSpeed = ref(1)
+
+  const maintenanceRecords = ref<MaintenanceRecord[]>([])
+  const componentAdjustedLifespans = ref<Record<string, number>>({})
+  const lastMaintenanceTimestamp = ref<number>(0)
 
   const effectiveValveArea = computed(() => {
     if (params.value.valveStuck) {
@@ -309,7 +346,7 @@ export const useBellowsStore = defineStore('bellows', () => {
     }
   })
 
-  function computeLifespanFromParams(p: BellowsParams): LifespanEvaluation {
+  function computeLifespanFromParams(p: BellowsParams, adjustedLifespans?: Record<string, number>): LifespanEvaluation {
     const freq = p.rodFrequency
     const frequencyFactor = 1 + Math.max(0, freq - 2) * 0.15 + Math.pow(Math.max(0, freq - 6), 2) * 0.08
     const valveStuckFactor = p.valveStuck ? 1 + p.valveStuckLevel * 3.5 : 1
@@ -330,7 +367,12 @@ export const useBellowsStore = defineStore('bellows', () => {
         case 'piston': wearMultiplier = wf.frequencyFactor * wf.loadPressureFactor * wf.resistanceFactor * (1 + wf.leakageFactor * 0.1); break
       }
       const wearRate = (1 / baseLifespan) * wearMultiplier
-      const remaining = baseLifespan / wearMultiplier
+      let remaining = baseLifespan / wearMultiplier
+      
+      if (adjustedLifespans && adjustedLifespans[key] !== undefined) {
+        remaining = adjustedLifespans[key]
+      }
+      
       const health = Math.max(0, Math.min(100, (remaining / baseLifespan) * 100))
       const threshold = baseLifespan * WARNING_LIFESPAN_RATIO
       let riskLevel: 'normal' | 'warning' | 'danger' = 'normal'
@@ -459,7 +501,72 @@ export const useBellowsStore = defineStore('bellows', () => {
   }
 
   const lifespanEvaluation = computed<LifespanEvaluation>(() => {
-    return computeLifespanFromParams(params.value)
+    return computeLifespanFromParams(params.value, componentAdjustedLifespans.value)
+  })
+
+  const sortedMaintenanceRecords = computed(() => {
+    return [...maintenanceRecords.value].sort((a, b) => b.maintenanceDate - a.maintenanceDate)
+  })
+
+  const maintenanceCostStats = computed<MaintenanceCostStats>(() => {
+    const records = maintenanceRecords.value
+    let totalCost = 0
+    let inspectionCount = 0, inspectionCost = 0
+    let valveCount = 0, valveCost = 0
+    let sealCount = 0, sealCost = 0
+    let pistonCount = 0, pistonCost = 0
+
+    records.forEach(r => {
+      totalCost += r.cost
+      switch (r.maintenanceType) {
+        case 'inspection':
+          inspectionCount++
+          inspectionCost += r.cost
+          break
+        case 'valve_replacement':
+          valveCount++
+          valveCost += r.cost
+          break
+        case 'seal_replacement':
+          sealCount++
+          sealCost += r.cost
+          break
+        case 'piston_replacement':
+          pistonCount++
+          pistonCost += r.cost
+          break
+      }
+    })
+
+    const costTrend = computeCostTrend(records)
+    const months = Math.max(1, computeMonthsSpan(records))
+    const avgMonthlyCost = totalCost / months
+
+    return {
+      totalMaintenanceCost: totalCost,
+      inspectionCount,
+      inspectionCost,
+      valveReplacementCount: valveCount,
+      valveReplacementCost: valveCost,
+      sealReplacementCount: sealCount,
+      sealReplacementCost: sealCost,
+      pistonReplacementCount: pistonCount,
+      pistonReplacementCost: pistonCost,
+      avgMonthlyCost,
+      costTrend
+    }
+  })
+
+  const maintenanceCycleAnalysis = computed<MaintenanceCycleAnalysis>(() => {
+    return computeMaintenanceCycleAnalysis(maintenanceRecords.value, lifespanEvaluation.value)
+  })
+
+  const calendarEvents = computed<CalendarEvent[]>(() => {
+    return generateCalendarEvents(maintenanceRecords.value, lifespanEvaluation.value)
+  })
+
+  const schemesMaintenanceComparison = computed<SchemeMaintenanceComparison[]>(() => {
+    return computeSchemesMaintenanceComparison(schemes.value)
   })
 
   function ensureSchemeLifespan(scheme: Scheme): LifespanEvaluation {
@@ -467,6 +574,418 @@ export const useBellowsStore = defineStore('bellows', () => {
     const computed = computeLifespanFromParams(scheme.params)
     scheme.lifespanEvaluation = computed
     return computed
+  }
+
+  function computeMonthsSpan(records: MaintenanceRecord[]): number {
+    if (records.length === 0) return 1
+    const dates = records.map(r => r.maintenanceDate)
+    const min = Math.min(...dates)
+    const max = Math.max(...dates, Date.now())
+    return Math.max(1, (max - min) / (1000 * 60 * 60 * 24 * 30))
+  }
+
+  function computeCostTrend(records: MaintenanceRecord[]): MaintenanceCostTrendPoint[] {
+    if (records.length === 0) return []
+    
+    const sorted = [...records].sort((a, b) => a.maintenanceDate - b.maintenanceDate)
+    const monthMap = new Map<string, MaintenanceCostTrendPoint>()
+    
+    sorted.forEach(r => {
+      const date = new Date(r.maintenanceDate)
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+      
+      if (!monthMap.has(key)) {
+        monthMap.set(key, {
+          date: key,
+          timestamp: new Date(date.getFullYear(), date.getMonth(), 1).getTime(),
+          totalCost: 0,
+          inspectionCost: 0,
+          valveCost: 0,
+          sealCost: 0,
+          pistonCost: 0
+        })
+      }
+      
+      const point = monthMap.get(key)!
+      point.totalCost += r.cost
+      switch (r.maintenanceType) {
+        case 'inspection': point.inspectionCost += r.cost; break
+        case 'valve_replacement': point.valveCost += r.cost; break
+        case 'seal_replacement': point.sealCost += r.cost; break
+        case 'piston_replacement': point.pistonCost += r.cost; break
+      }
+    })
+    
+    return Array.from(monthMap.values()).sort((a, b) => a.timestamp - b.timestamp)
+  }
+
+  function computeMaintenanceCycleAnalysis(
+    records: MaintenanceRecord[],
+    lifespan: LifespanEvaluation
+  ): MaintenanceCycleAnalysis {
+    const componentReplacements: ComponentReplacementHistory[] = []
+    const cycleDeviations: MaintenanceCycleDeviationPoint[] = []
+    
+    const components: Array<{ key: MaintenanceComponent; name: string; baseLifespan: number }> = [
+      { key: 'valve', name: '阀片组件', baseLifespan: BASE_VALVE_LIFESPAN },
+      { key: 'seal', name: '密封件', baseLifespan: BASE_SEAL_LIFESPAN },
+      { key: 'piston', name: '活塞组件', baseLifespan: BASE_PISTON_LIFESPAN }
+    ]
+    
+    components.forEach(comp => {
+      const typeMap: Record<string, MaintenanceType> = {
+        valve: 'valve_replacement',
+        seal: 'seal_replacement',
+        piston: 'piston_replacement'
+      }
+      
+      const compRecords = records
+        .filter(r => r.maintenanceType === typeMap[comp.key])
+        .sort((a, b) => a.maintenanceDate - b.maintenanceDate)
+      
+      if (compRecords.length > 0) {
+        const totalCost = compRecords.reduce((sum, r) => sum + r.cost, 0)
+        const firstDate = compRecords[0].maintenanceDate
+        const lastDate = compRecords[compRecords.length - 1].maintenanceDate
+        
+        let avgIntervalHours = 0
+        if (compRecords.length > 1) {
+          const intervals: number[] = []
+          for (let i = 1; i < compRecords.length; i++) {
+            intervals.push((compRecords[i].maintenanceDate - compRecords[i - 1].maintenanceDate) / (1000 * 60 * 60))
+          }
+          avgIntervalHours = intervals.reduce((a, b) => a + b, 0) / intervals.length
+        }
+        
+        componentReplacements.push({
+          component: comp.key,
+          componentName: comp.name,
+          replacementCount: compRecords.length,
+          totalCost,
+          avgCost: totalCost / compRecords.length,
+          firstReplacementDate: firstDate,
+          lastReplacementDate: lastDate,
+          avgIntervalHours: Math.round(avgIntervalHours)
+        })
+        
+        const compLifespan = lifespan.components.find(c => c.componentKey === comp.key)
+        if (compLifespan && avgIntervalHours > 0) {
+          const expectedCycle = compLifespan.baseLifespanHours
+          const actualCycle = avgIntervalHours
+          const deviation = actualCycle - expectedCycle
+          const deviationPercent = (deviation / expectedCycle) * 100
+          
+          cycleDeviations.push({
+            component: comp.key,
+            componentName: comp.name,
+            expectedCycleHours: expectedCycle,
+            actualCycleHours: Math.round(actualCycle),
+            deviationHours: Math.round(deviation),
+            deviationPercent: Math.round(deviationPercent * 10) / 10
+          })
+        }
+      }
+    })
+    
+    const totalMaintenanceCount = records.length
+    const monthsSpan = computeMonthsSpan(records)
+    const avgMaintenanceFrequency = totalMaintenanceCount / Math.max(1, monthsSpan)
+    
+    return {
+      componentReplacements,
+      cycleDeviations,
+      avgMaintenanceFrequency: Math.round(avgMaintenanceFrequency * 10) / 10
+    }
+  }
+
+  function generateCalendarEvents(
+    records: MaintenanceRecord[],
+    lifespan: LifespanEvaluation
+  ): CalendarEvent[] {
+    const events: CalendarEvent[] = []
+    
+    records.forEach(r => {
+      events.push({
+        id: `hist_${r.id}`,
+        title: MAINTENANCE_TYPE_LABELS[r.maintenanceType],
+        date: r.maintenanceDate,
+        type: 'maintenance',
+        component: r.component,
+        componentName: COMPONENT_NAMES[r.component],
+        description: r.description,
+        isCompleted: true,
+        priority: r.maintenanceType === 'inspection' ? 'low' : 'medium'
+      })
+    })
+    
+    lifespan.components.forEach(comp => {
+      const remainingHours = comp.remainingLifespanHours
+      const maintenanceDate = Date.now() + remainingHours * 60 * 60 * 1000
+      const weeksRemaining = remainingHours / (24 * 7)
+      
+      let priority: CalendarEvent['priority'] = 'low'
+      if (comp.riskLevel === 'danger') priority = 'critical'
+      else if (comp.riskLevel === 'warning') priority = 'high'
+      else if (weeksRemaining < 8) priority = 'medium'
+      
+      events.push({
+        id: `sched_${comp.componentKey}`,
+        title: `建议更换${comp.componentName}`,
+        date: maintenanceDate,
+        type: 'scheduled',
+        component: comp.componentKey,
+        componentName: comp.componentName,
+        description: `预计剩余寿命 ${Math.round(remainingHours)} 小时，建议安排维护更换`,
+        isCompleted: false,
+        priority
+      })
+    })
+    
+    lifespan.maintenanceAlerts.forEach(alert => {
+      if (alert.level === 'danger' || alert.level === 'warning') {
+        events.push({
+          id: `alert_${alert.id}`,
+          title: alert.title,
+          date: Date.now(),
+          type: 'alert',
+          component: alert.componentKey,
+          componentName: alert.componentName,
+          description: alert.message,
+          isCompleted: false,
+          priority: alert.level === 'danger' ? 'critical' : 'high'
+        })
+      }
+    })
+    
+    return events.sort((a, b) => a.date - b.date)
+  }
+
+  function computeSchemesMaintenanceComparison(schemes: Scheme[]): SchemeMaintenanceComparison[] {
+    return schemes.map(scheme => {
+      const records = scheme.maintenanceRecords || []
+      const lifespan = scheme.lifespanEvaluation || computeLifespanFromParams(scheme.params)
+      const costStats = scheme.maintenanceCostStats || computeMaintenanceCostStatsForRecords(records)
+      
+      const totalCost = costStats.totalMaintenanceCost
+      const maintenanceCount = records.length
+      const monthsSpan = computeMonthsSpan(records)
+      const totalCostPerYear = (totalCost / Math.max(1, monthsSpan)) * 12
+      
+      const lifespanRestoredValues = records.map(r => r.lifespanRestored).filter(v => v > 0)
+      const avgLifespanRestored = lifespanRestoredValues.length > 0
+        ? lifespanRestoredValues.reduce((a, b) => a + b, 0) / lifespanRestoredValues.length
+        : 0
+      
+      const healthImprovements = records
+        .map(r => r.healthScoreAfter - r.healthScoreBefore)
+        .filter(v => v > 0)
+      const avgHealthImprovement = healthImprovements.length > 0
+        ? healthImprovements.reduce((a, b) => a + b, 0) / healthImprovements.length
+        : 0
+      
+      return {
+        schemeId: scheme.id,
+        schemeName: scheme.name,
+        totalMaintenanceCost: totalCost,
+        maintenanceCount,
+        avgLifespanRestored: Math.round(avgLifespanRestored),
+        avgHealthImprovement: Math.round(avgHealthImprovement * 10) / 10,
+        maintenanceFrequency: Math.round((maintenanceCount / Math.max(1, monthsSpan)) * 10) / 10,
+        valveLifespanHours: lifespan.components[0].remainingLifespanHours,
+        sealLifespanHours: lifespan.components[1].remainingLifespanHours,
+        pistonLifespanHours: lifespan.components[2].remainingLifespanHours,
+        overallHealthScore: lifespan.overallHealthScore,
+        totalCostPerYear: Math.round(totalCostPerYear)
+      }
+    })
+  }
+
+  function computeMaintenanceCostStatsForRecords(records: MaintenanceRecord[]): MaintenanceCostStats {
+    let totalCost = 0
+    let inspectionCount = 0, inspectionCost = 0
+    let valveCount = 0, valveCost = 0
+    let sealCount = 0, sealCost = 0
+    let pistonCount = 0, pistonCost = 0
+
+    records.forEach(r => {
+      totalCost += r.cost
+      switch (r.maintenanceType) {
+        case 'inspection':
+          inspectionCount++
+          inspectionCost += r.cost
+          break
+        case 'valve_replacement':
+          valveCount++
+          valveCost += r.cost
+          break
+        case 'seal_replacement':
+          sealCount++
+          sealCost += r.cost
+          break
+        case 'piston_replacement':
+          pistonCount++
+          pistonCost += r.cost
+          break
+      }
+    })
+
+    const costTrend = computeCostTrend(records)
+    const months = Math.max(1, computeMonthsSpan(records))
+    const avgMonthlyCost = totalCost / months
+
+    return {
+      totalMaintenanceCost: totalCost,
+      inspectionCount,
+      inspectionCost,
+      valveReplacementCount: valveCount,
+      valveReplacementCost: valveCost,
+      sealReplacementCount: sealCount,
+      sealReplacementCost: sealCost,
+      pistonReplacementCount: pistonCount,
+      pistonReplacementCost: pistonCost,
+      avgMonthlyCost,
+      costTrend
+    }
+  }
+
+  function getComponentHealthBeforeMaintenance(componentKey: string): number {
+    const comp = lifespanEvaluation.value.components.find(c => c.componentKey === componentKey)
+    return comp ? comp.healthScore : 100
+  }
+
+  function applyMaintenanceToLifespan(
+    component: MaintenanceComponent,
+    maintenanceType: MaintenanceType,
+    currentLifespan: LifespanEvaluation
+  ): { adjustedLifespans: Record<string, number>; healthScoreAfter: number; lifespanRestored: number } {
+    const adjusted: Record<string, number> = { ...componentAdjustedLifespans.value }
+    const restoreRatio = LIFESPAN_RESTORE_RATIO[maintenanceType]
+    let lifespanRestored = 0
+    let healthScoreAfter = 100
+    
+    if (component === 'system') {
+      currentLifespan.components.forEach(comp => {
+        const baseLifespan = comp.baseLifespanHours
+        const currentRemaining = comp.remainingLifespanHours
+        const restored = Math.round(baseLifespan * restoreRatio)
+        const newRemaining = Math.min(baseLifespan, currentRemaining + restored)
+        adjusted[comp.componentKey] = newRemaining
+        lifespanRestored += restored
+        
+        if (comp.componentKey === 'valve') {
+          healthScoreAfter = Math.min(100, (newRemaining / baseLifespan) * 100)
+        }
+      })
+    } else {
+      const comp = currentLifespan.components.find(c => c.componentKey === component)
+      if (comp) {
+        const baseLifespan = comp.baseLifespanHours
+        const currentRemaining = comp.remainingLifespanHours
+        const restored = Math.round(baseLifespan * restoreRatio)
+        const newRemaining = Math.min(baseLifespan, currentRemaining + restored)
+        adjusted[component] = newRemaining
+        lifespanRestored = restored
+        healthScoreAfter = Math.min(100, (newRemaining / baseLifespan) * 100)
+      }
+    }
+    
+    return { adjustedLifespans: adjusted, healthScoreAfter, lifespanRestored }
+  }
+
+  function addMaintenanceRecord(
+    maintenanceType: MaintenanceType,
+    component: MaintenanceComponent,
+    maintenanceDate: number,
+    description: string,
+    cost: number,
+    operator: string,
+    remarks: string
+  ): MaintenanceRecord {
+    const currentLifespan = lifespanEvaluation.value
+    const healthScoreBefore = component === 'system'
+      ? currentLifespan.overallHealthScore
+      : getComponentHealthBeforeMaintenance(component)
+    
+    const { adjustedLifespans, healthScoreAfter, lifespanRestored } = applyMaintenanceToLifespan(
+      component,
+      maintenanceType,
+      currentLifespan
+    )
+    
+    const record: MaintenanceRecord = {
+      id: `maint_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      maintenanceType,
+      component,
+      maintenanceDate,
+      description,
+      cost,
+      operator,
+      remarks,
+      lifespanRestored,
+      healthScoreBefore: Math.round(healthScoreBefore * 10) / 10,
+      healthScoreAfter: Math.round(healthScoreAfter * 10) / 10
+    }
+    
+    maintenanceRecords.value.push(record)
+    componentAdjustedLifespans.value = adjustedLifespans
+    lastMaintenanceTimestamp.value = Date.now()
+    
+    return record
+  }
+
+  function updateMaintenanceRecord(
+    id: string,
+    updates: Partial<Pick<MaintenanceRecord, 'maintenanceType' | 'component' | 'maintenanceDate' | 'description' | 'cost' | 'operator' | 'remarks'>>
+  ): boolean {
+    const index = maintenanceRecords.value.findIndex(r => r.id === id)
+    if (index === -1) return false
+    
+    const record = maintenanceRecords.value[index]
+    maintenanceRecords.value[index] = { ...record, ...updates }
+    
+    recalculateAllAdjustedLifespans()
+    
+    return true
+  }
+
+  function deleteMaintenanceRecord(id: string): boolean {
+    const index = maintenanceRecords.value.findIndex(r => r.id === id)
+    if (index === -1) return false
+    
+    maintenanceRecords.value.splice(index, 1)
+    recalculateAllAdjustedLifespans()
+    
+    return true
+  }
+
+  function recalculateAllAdjustedLifespans() {
+    let adjusted: Record<string, number> = {}
+    
+    const sortedRecords = [...maintenanceRecords.value].sort((a, b) => a.maintenanceDate - b.maintenanceDate)
+    
+    sortedRecords.forEach(record => {
+      const tempEval = computeLifespanFromParams(params.value, adjusted)
+      const result = applyMaintenanceToLifespan(record.component, record.maintenanceType, tempEval)
+      adjusted = result.adjustedLifespans
+    })
+    
+    componentAdjustedLifespans.value = adjusted
+    lastMaintenanceTimestamp.value = Date.now()
+  }
+
+  function loadMaintenanceRecords(records: MaintenanceRecord[], adjustedLifespans?: Record<string, number>) {
+    maintenanceRecords.value = deepClone(records)
+    if (adjustedLifespans) {
+      componentAdjustedLifespans.value = { ...adjustedLifespans }
+    } else {
+      recalculateAllAdjustedLifespans()
+    }
+  }
+
+  function clearMaintenanceRecords() {
+    maintenanceRecords.value = []
+    componentAdjustedLifespans.value = {}
+    lastMaintenanceTimestamp.value = 0
   }
 
   function computeStateAtTime(targetTime: number) {
@@ -669,7 +1188,10 @@ export const useBellowsStore = defineStore('bellows', () => {
       pressureHistory: deepClone(pressureHistory.value),
       efficiencyHistory: deepClone(efficiencyHistory.value),
       riskHistory: deepClone(riskHistory.value),
-      lifespanEvaluation: deepClone(lifespanEvaluation.value)
+      lifespanEvaluation: deepClone(lifespanEvaluation.value),
+      maintenanceRecords: deepClone(maintenanceRecords.value),
+      maintenanceCostStats: deepClone(maintenanceCostStats.value),
+      maintenanceCycleAnalysis: deepClone(maintenanceCycleAnalysis.value)
     }
     schemes.value.push(scheme)
     saveSchemesToStorage(schemes.value)
@@ -699,6 +1221,12 @@ export const useBellowsStore = defineStore('bellows', () => {
       pressureHistory.value = deepClone(scheme.pressureHistory || [])
       efficiencyHistory.value = deepClone(scheme.efficiencyHistory || [])
       riskHistory.value = deepClone(scheme.riskHistory || [])
+
+      if (scheme.maintenanceRecords) {
+        loadMaintenanceRecords(scheme.maintenanceRecords)
+      } else {
+        clearMaintenanceRecords()
+      }
 
       animationState.value = computeStateAtTime(animationState.value.time)
 
@@ -756,6 +1284,14 @@ export const useBellowsStore = defineStore('bellows', () => {
     pressureHistory,
     efficiencyHistory,
     riskHistory,
+    maintenanceRecords,
+    componentAdjustedLifespans,
+    lastMaintenanceTimestamp,
+    sortedMaintenanceRecords,
+    maintenanceCostStats,
+    maintenanceCycleAnalysis,
+    calendarEvents,
+    schemesMaintenanceComparison,
     effectiveValveArea,
     pistonArea,
     chamberVolume,
@@ -767,6 +1303,18 @@ export const useBellowsStore = defineStore('bellows', () => {
     selectedSchemes,
     computeLifespanFromParams,
     ensureSchemeLifespan,
+    computeCostTrend,
+    computeMaintenanceCycleAnalysis,
+    generateCalendarEvents,
+    computeSchemesMaintenanceComparison,
+    addMaintenanceRecord,
+    updateMaintenanceRecord,
+    deleteMaintenanceRecord,
+    loadMaintenanceRecords,
+    clearMaintenanceRecords,
+    recalculateAllAdjustedLifespans,
+    MAINTENANCE_TYPE_LABELS,
+    COMPONENT_NAMES,
     updateAnimation,
     resetAnimation,
     generateFullHistory,

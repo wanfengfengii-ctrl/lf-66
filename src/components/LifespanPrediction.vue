@@ -255,57 +255,485 @@
           <span class="hint-icon">ℹ️</span>
           <span class="hint-text">提示：升级前保存的旧方案将按其保存参数自动计算寿命数据，用于对比参考。</span>
         </div>
-        <div class="chart-item full-width">
-          <div ref="compareHealthRadarRef" class="chart tall"></div>
-          <p class="chart-label">多方案部件健康度对比（雷达图）</p>
+        
+        <div class="comparison-subtabs">
+          <button
+            v-for="subtab in comparisonSubtabs"
+            :key="subtab.key"
+            @click="comparisonSubtab = subtab.key"
+            :class="['comparison-subtab', { active: comparisonSubtab === subtab.key }]"
+          >
+            {{ subtab.label }}
+          </button>
         </div>
 
-        <div class="chart-item full-width">
-          <div ref="compareLifespanBarRef" class="chart tall"></div>
-          <p class="chart-label">多方案部件剩余寿命对比（小时）</p>
-        </div>
-
-        <div class="comparison-table-card">
-          <h4 class="section-heading">📋 维护周期对比表</h4>
-          <div class="comparison-table-wrapper">
-            <table class="comparison-table">
-              <thead>
-                <tr>
-                  <th>方案名称</th>
-                  <th>整体健康度</th>
-                  <th>阀片寿命</th>
-                  <th>密封件寿命</th>
-                  <th>活塞寿命</th>
-                  <th>维护周期</th>
-                  <th>风险状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(scheme, idx) in computedForComparison" :key="scheme.id">
-                  <td :class="['scheme-name-cell']">
-                    <span class="color-dot" :style="{ background: comparisonColors[idx % comparisonColors.length] }"></span>
-                    {{ scheme.name }}
-                  </td>
-                  <td :class="getHealthTableClass(scheme.lifespanEvaluation.overallHealthScore)">
-                    {{ scheme.lifespanEvaluation.overallHealthScore.toFixed(1) }}%
-                  </td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation.components[0].remainingLifespanHours) }}</td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation.components[1].remainingLifespanHours) }}</td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation.components[2].remainingLifespanHours) }}</td>
-                  <td>{{ formatHours(scheme.lifespanEvaluation.estimatedMaintenanceCycleHours) }}</td>
-                  <td>
-                    <span v-if="scheme.lifespanEvaluation.hasHighRisk" class="high-risk-tag">
-                      🚨 紧急 {{ scheme.lifespanEvaluation.highRiskComponents.length }}个
-                    </span>
-                    <span v-else-if="scheme.lifespanEvaluation.hasWarning" class="warning-tag">
-                      ⚠️ 预警 {{ scheme.lifespanEvaluation.warningComponents.length }}个
-                    </span>
-                    <span v-else class="no-risk-tag">✅ 正常</span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+        <div v-show="comparisonSubtab === 'lifespan'" class="comparison-lifespan">
+          <div class="chart-item full-width">
+            <div ref="compareHealthRadarRef" class="chart tall"></div>
+            <p class="chart-label">多方案部件健康度对比（雷达图）</p>
           </div>
+
+          <div class="chart-item full-width">
+            <div ref="compareLifespanBarRef" class="chart tall"></div>
+            <p class="chart-label">多方案部件剩余寿命对比（小时）</p>
+          </div>
+
+          <div class="comparison-table-card">
+            <h4 class="section-heading">📋 寿命对比表</h4>
+            <div class="comparison-table-wrapper">
+              <table class="comparison-table">
+                <thead>
+                  <tr>
+                    <th>方案名称</th>
+                    <th>整体健康度</th>
+                    <th>阀片寿命</th>
+                    <th>密封件寿命</th>
+                    <th>活塞寿命</th>
+                    <th>维护周期</th>
+                    <th>风险状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(scheme, idx) in computedForComparison" :key="scheme.id">
+                    <td :class="['scheme-name-cell']">
+                      <span class="color-dot" :style="{ background: comparisonColors[idx % comparisonColors.length] }"></span>
+                      {{ scheme.name }}
+                    </td>
+                    <td :class="getHealthTableClass(scheme.lifespanEvaluation.overallHealthScore)">
+                      {{ scheme.lifespanEvaluation.overallHealthScore.toFixed(1) }}%
+                    </td>
+                    <td>{{ formatHours(scheme.lifespanEvaluation.components[0].remainingLifespanHours) }}</td>
+                    <td>{{ formatHours(scheme.lifespanEvaluation.components[1].remainingLifespanHours) }}</td>
+                    <td>{{ formatHours(scheme.lifespanEvaluation.components[2].remainingLifespanHours) }}</td>
+                    <td>{{ formatHours(scheme.lifespanEvaluation.estimatedMaintenanceCycleHours) }}</td>
+                    <td>
+                      <span v-if="scheme.lifespanEvaluation.hasHighRisk" class="high-risk-tag">
+                        🚨 紧急 {{ scheme.lifespanEvaluation.highRiskComponents.length }}个
+                      </span>
+                      <span v-else-if="scheme.lifespanEvaluation.hasWarning" class="warning-tag">
+                        ⚠️ 预警 {{ scheme.lifespanEvaluation.warningComponents.length }}个
+                      </span>
+                      <span v-else class="no-risk-tag">✅ 正常</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div v-show="comparisonSubtab === 'maintenance'" class="comparison-maintenance">
+          <div v-if="schemesMaintenanceComparison.filter(c => c.maintenanceCount > 0).length < 2" class="empty-compare small">
+            <div class="empty-compare-icon">📝</div>
+            <p>所选方案中维护记录不足，无法进行维护对比</p>
+            <p class="empty-compare-tip">请为方案添加维护记录后再进行对比</p>
+          </div>
+          <div v-else>
+            <div class="chart-item full-width">
+              <div ref="maintenanceCompareChartRef" class="chart tall"></div>
+              <p class="chart-label">多方案维护指标对比</p>
+            </div>
+
+            <div class="comparison-table-card">
+              <h4 class="section-heading">💰 维护成本对比</h4>
+              <div class="comparison-table-wrapper">
+                <table class="comparison-table">
+                  <thead>
+                    <tr>
+                      <th>方案名称</th>
+                      <th>累计维护费用</th>
+                      <th>年维护成本</th>
+                      <th>维护次数</th>
+                      <th>月均维护频率</th>
+                      <th>平均寿命恢复</th>
+                      <th>平均健康改善</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(data, idx) in schemesMaintenanceComparison.filter(c => c.maintenanceCount > 0)" :key="data.schemeId">
+                      <td :class="['scheme-name-cell']">
+                        <span class="color-dot" :style="{ background: comparisonColors[idx % comparisonColors.length] }"></span>
+                        {{ data.schemeName }}
+                      </td>
+                      <td class="cost">¥{{ data.totalMaintenanceCost.toLocaleString() }}</td>
+                      <td class="cost">¥{{ data.totalCostPerYear.toLocaleString() }}/年</td>
+                      <td>{{ data.maintenanceCount }} 次</td>
+                      <td>{{ data.maintenanceFrequency }} 次/月</td>
+                      <td class="success">+{{ formatHours(data.avgLifespanRestored) }}</td>
+                      <td class="success">+{{ data.avgHealthImprovement }}%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="comparison-table-card">
+              <h4 class="section-heading">⚖️ 综合效益对比</h4>
+              <div class="comparison-table-wrapper">
+                <table class="comparison-table">
+                  <thead>
+                    <tr>
+                      <th>方案名称</th>
+                      <th>整体健康度</th>
+                      <th>阀片寿命</th>
+                      <th>密封件寿命</th>
+                      <th>活塞寿命</th>
+                      <th>年维护成本</th>
+                      <th>成本效益比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(data, idx) in schemesMaintenanceComparison.filter(c => c.maintenanceCount > 0)" :key="data.schemeId">
+                      <td :class="['scheme-name-cell']">
+                        <span class="color-dot" :style="{ background: comparisonColors[idx % comparisonColors.length] }"></span>
+                        {{ data.schemeName }}
+                      </td>
+                      <td :class="getHealthTableClass(data.overallHealthScore)">
+                        {{ data.overallHealthScore.toFixed(1) }}%
+                      </td>
+                      <td>{{ formatHours(data.valveLifespanHours) }}</td>
+                      <td>{{ formatHours(data.sealLifespanHours) }}</td>
+                      <td>{{ formatHours(data.pistonLifespanHours) }}</td>
+                      <td class="cost">¥{{ data.totalCostPerYear.toLocaleString() }}</td>
+                      <td>
+                        {{ (data.overallHealthScore / Math.max(1, data.totalCostPerYear) * 1000).toFixed(2) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="table-note">💡 成本效益比 = 健康度 / 年维护成本 × 1000，数值越高表示投入产出比越好</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-show="activeSubtab === 'records'" class="maintenance-records-view">
+      <div class="records-header">
+        <h4 class="section-heading">
+          <span>📋 维护记录管理</span>
+          <span class="record-count-badge">{{ maintenanceRecords.length }}</span>
+        </h4>
+        <button @click="openAddRecordModal" class="add-record-btn">
+          ➕ 登记维护记录
+        </button>
+      </div>
+
+      <div v-if="maintenanceRecords.length === 0" class="empty-records">
+        <div class="empty-icon">📝</div>
+        <p>暂无维护记录</p>
+        <p class="empty-tip">点击上方按钮登记首次维护记录</p>
+      </div>
+
+      <div v-else class="records-list">
+        <div
+          v-for="record in maintenanceRecords"
+          :key="record.id"
+          class="record-card"
+        >
+          <div class="record-header">
+            <span :class="['record-type-badge', record.maintenanceType]">
+              {{ MAINTENANCE_TYPE_LABELS[record.maintenanceType] }}
+            </span>
+            <span class="record-component">
+              {{ COMPONENT_NAMES[record.component] }}
+            </span>
+            <span class="record-date">
+              {{ formatDate(record.maintenanceDate) }}
+            </span>
+          </div>
+          <div class="record-body">
+            <p class="record-description">{{ record.description }}</p>
+            <div class="record-stats">
+              <div class="record-stat">
+                <span class="stat-label">费用</span>
+                <span class="stat-value cost">¥{{ record.cost.toFixed(0) }}</span>
+              </div>
+              <div class="record-stat">
+                <span class="stat-label">操作人员</span>
+                <span class="stat-value">{{ record.operator }}</span>
+              </div>
+              <div class="record-stat">
+                <span class="stat-label">寿命恢复</span>
+                <span class="stat-value success">+{{ formatHours(record.lifespanRestored) }}</span>
+              </div>
+              <div class="record-stat">
+                <span class="stat-label">健康度变化</span>
+                <span class="stat-value">
+                  <span :class="record.healthScoreAfter > record.healthScoreBefore ? 'success' : 'danger'">
+                    {{ record.healthScoreBefore }}% → {{ record.healthScoreAfter }}%
+                  </span>
+                </span>
+              </div>
+            </div>
+            <p v-if="record.remarks" class="record-remarks">
+              <strong>备注：</strong>{{ record.remarks }}
+            </p>
+          </div>
+          <div class="record-actions">
+            <button @click="editRecord(record)" class="record-action-btn edit">编辑</button>
+            <button @click="deleteRecord(record.id)" class="record-action-btn delete">删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-show="activeSubtab === 'calendar'" class="maintenance-calendar-view">
+      <div class="calendar-header">
+        <h4 class="section-heading">📅 维护日历</h4>
+        <div class="calendar-view-toggle">
+          <button
+            @click="calendarView = 'month'"
+            :class="['view-toggle-btn', { active: calendarView === 'month' }]"
+          >
+            月视图
+          </button>
+          <button
+            @click="calendarView = 'list'"
+            :class="['view-toggle-btn', { active: calendarView === 'list' }]"
+          >
+            列表视图
+          </button>
+        </div>
+      </div>
+
+      <div v-show="calendarView === 'month'" class="calendar-month-view">
+        <div class="calendar-nav">
+          <button @click="changeMonth(-1)" class="nav-btn">◀</button>
+          <span class="calendar-title">
+            {{ calendarCurrentDate.getFullYear() }}年{{ calendarCurrentDate.getMonth() + 1 }}月
+          </span>
+          <button @click="changeMonth(1)" class="nav-btn">▶</button>
+        </div>
+        <div class="calendar-grid">
+          <div class="calendar-weekday">日</div>
+          <div class="calendar-weekday">一</div>
+          <div class="calendar-weekday">二</div>
+          <div class="calendar-weekday">三</div>
+          <div class="calendar-weekday">四</div>
+          <div class="calendar-weekday">五</div>
+          <div class="calendar-weekday">六</div>
+          <div
+            v-for="(day, idx) in calendarDays"
+            :key="idx"
+            :class="['calendar-day', { 
+              'other-month': day.isOtherMonth,
+              'today': day.isToday,
+              'has-events': day.events.length > 0
+            }]"
+          >
+            <span class="day-number">{{ day.date.getDate() }}</span>
+            <div class="day-events">
+              <div
+                v-for="event in day.events.slice(0, 2)"
+                :key="event.id"
+                :class="['day-event', event.type, `priority-${event.priority}`]"
+                :title="event.title"
+              >
+                {{ event.title.slice(0, 6) }}
+              </div>
+              <div v-if="day.events.length > 2" class="more-events">
+                +{{ day.events.length - 2 }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-show="calendarView === 'list'" class="calendar-list-view">
+        <div v-if="calendarEvents.length === 0" class="empty-calendar">
+          <div class="empty-icon">📅</div>
+          <p>暂无日历事件</p>
+        </div>
+        <div v-else class="event-list">
+          <div
+            v-for="event in calendarEvents"
+            :key="event.id"
+            :class="['event-item', event.type, `priority-${event.priority}`, { completed: event.isCompleted }]"
+          >
+            <div class="event-icon">
+              {{ getEventIcon(event.type) }}
+            </div>
+            <div class="event-content">
+              <div class="event-header">
+                <span class="event-title">{{ event.title }}</span>
+                <span :class="['event-priority', event.priority]">
+                  {{ getPriorityLabel(event.priority) }}
+                </span>
+              </div>
+              <p class="event-description">{{ event.description }}</p>
+              <div class="event-meta">
+                <span class="event-date">📅 {{ formatDateTime(event.date) }}</span>
+                <span v-if="event.componentName" class="event-component">
+                  🔧 {{ event.componentName }}
+                </span>
+                <span v-if="event.isCompleted" class="event-status completed">✅ 已完成</span>
+                <span v-else class="event-status pending">⏳ 待处理</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-show="activeSubtab === 'analysis'" class="maintenance-analysis-view">
+      <div class="analysis-stats-grid">
+        <div class="analysis-stat-card">
+          <span class="stat-icon">💰</span>
+          <div class="stat-content">
+            <span class="stat-label">累计维护费用</span>
+            <span class="stat-number">¥{{ maintenanceCostStats.totalMaintenanceCost.toLocaleString() }}</span>
+          </div>
+        </div>
+        <div class="analysis-stat-card">
+          <span class="stat-icon">📊</span>
+          <div class="stat-content">
+            <span class="stat-label">月均维护费用</span>
+            <span class="stat-number">¥{{ maintenanceCostStats.avgMonthlyCost.toFixed(0) }}</span>
+          </div>
+        </div>
+        <div class="analysis-stat-card">
+          <span class="stat-icon">🔧</span>
+          <div class="stat-content">
+            <span class="stat-label">维护总次数</span>
+            <span class="stat-number">{{ maintenanceRecords.length }}</span>
+          </div>
+        </div>
+        <div class="analysis-stat-card">
+          <span class="stat-icon">⚡</span>
+          <div class="stat-content">
+            <span class="stat-label">月均维护频率</span>
+            <span class="stat-number">{{ maintenanceCycleAnalysis.avgMaintenanceFrequency }} 次/月</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-item full-width">
+        <div ref="costTrendChartRef" class="chart tall"></div>
+        <p class="chart-label">维护成本趋势图（月度）</p>
+      </div>
+
+      <div class="chart-item full-width">
+        <div ref="componentReplacementChartRef" class="chart tall"></div>
+        <p class="chart-label">部件更换历史统计</p>
+      </div>
+
+      <div class="chart-item full-width">
+        <div ref="cycleDeviationChartRef" class="chart tall"></div>
+        <p class="chart-label">维护周期偏差分析</p>
+      </div>
+
+      <div v-if="maintenanceCycleAnalysis.componentReplacements.length > 0" class="replacement-summary">
+        <h4 class="section-heading">📋 部件更换明细</h4>
+        <div class="replacement-table-wrapper">
+          <table class="replacement-table">
+            <thead>
+              <tr>
+                <th>部件名称</th>
+                <th>更换次数</th>
+                <th>累计费用</th>
+                <th>单次平均</th>
+                <th>平均更换周期</th>
+                <th>首次更换</th>
+                <th>最近更换</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in maintenanceCycleAnalysis.componentReplacements" :key="item.component">
+                <td><strong>{{ item.componentName }}</strong></td>
+                <td>{{ item.replacementCount }} 次</td>
+                <td class="cost">¥{{ item.totalCost.toLocaleString() }}</td>
+                <td class="cost">¥{{ item.avgCost.toFixed(0) }}</td>
+                <td>{{ formatHours(item.avgIntervalHours) }}</td>
+                <td>{{ formatDate(item.firstReplacementDate) }}</td>
+                <td>{{ formatDate(item.lastReplacementDate) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showAddRecordModal" class="modal-overlay" @click.self="closeAddRecordModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>{{ editingRecord ? '编辑维护记录' : '登记维护记录' }}</h3>
+          <button @click="closeAddRecordModal" class="close-btn">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>维护类型</label>
+            <select v-model="newRecord.maintenanceType" class="form-select">
+              <option value="inspection">例行检查</option>
+              <option value="valve_replacement">更换阀片</option>
+              <option value="seal_replacement">更换密封件</option>
+              <option value="piston_replacement">更换活塞组件</option>
+              <option value="other">其他维护</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>维护部件</label>
+            <select v-model="newRecord.component" class="form-select">
+              <option value="system">系统整体</option>
+              <option value="valve">阀片组件</option>
+              <option value="seal">密封件</option>
+              <option value="piston">活塞组件</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>维护日期</label>
+            <input
+              type="datetime-local"
+              v-model="dateTimeLocalValue"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label>维护内容描述</label>
+            <textarea
+              v-model="newRecord.description"
+              class="form-textarea"
+              rows="3"
+              placeholder="请描述维护的具体内容..."
+            ></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>维护费用 (元)</label>
+              <input
+                type="number"
+                v-model.number="newRecord.cost"
+                class="form-input"
+                min="0"
+                step="1"
+              />
+            </div>
+            <div class="form-group">
+              <label>操作人员</label>
+              <input
+                type="text"
+                v-model="newRecord.operator"
+                class="form-input"
+                placeholder="请输入操作人员姓名"
+              />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>备注</label>
+            <textarea
+              v-model="newRecord.remarks"
+              class="form-textarea"
+              rows="2"
+              placeholder="其他需要记录的信息..."
+            ></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeAddRecordModal" class="btn btn-secondary">取消</button>
+          <button @click="saveRecord" class="btn btn-primary">
+            {{ editingRecord ? '保存修改' : '确认登记' }}
+          </button>
         </div>
       </div>
     </div>
@@ -328,21 +756,61 @@ const lifespanSubtabs = [
   { key: 'overview', label: '总览', icon: '📊' },
   { key: 'trend', label: '寿命趋势', icon: '📈' },
   { key: 'alerts', label: '维护预警', icon: '⚠️' },
+  { key: 'records', label: '维护记录', icon: '📋' },
+  { key: 'calendar', label: '维护日历', icon: '📅' },
+  { key: 'analysis', label: '维护分析', icon: '📉' },
   { key: 'comparison', label: '方案对比', icon: '🆚' }
 ]
 const activeSubtab = ref('overview')
+
+const showAddRecordModal = ref(false)
+const editingRecord = ref<any>(null)
+const newRecord = ref({
+  maintenanceType: 'inspection' as any,
+  component: 'system' as any,
+  maintenanceDate: Date.now(),
+  description: '',
+  cost: 0,
+  operator: '',
+  remarks: ''
+})
 
 const healthGaugeRef = ref<HTMLDivElement | null>(null)
 const lifespanTrendChartRef = ref<HTMLDivElement | null>(null)
 const componentLifespanBarRef = ref<HTMLDivElement | null>(null)
 const compareHealthRadarRef = ref<HTMLDivElement | null>(null)
 const compareLifespanBarRef = ref<HTMLDivElement | null>(null)
+const costTrendChartRef = ref<HTMLDivElement | null>(null)
+const componentReplacementChartRef = ref<HTMLDivElement | null>(null)
+const cycleDeviationChartRef = ref<HTMLDivElement | null>(null)
+const maintenanceCompareChartRef = ref<HTMLDivElement | null>(null)
 
 let healthGaugeChart: echarts.ECharts | null = null
 let lifespanTrendChart: echarts.ECharts | null = null
 let componentLifespanBarChart: echarts.ECharts | null = null
 let compareHealthRadarChart: echarts.ECharts | null = null
 let compareLifespanBarChart: echarts.ECharts | null = null
+let costTrendChart: echarts.ECharts | null = null
+let componentReplacementChart: echarts.ECharts | null = null
+let cycleDeviationChart: echarts.ECharts | null = null
+let maintenanceCompareChart: echarts.ECharts | null = null
+
+const maintenanceRecords = computed(() => store.sortedMaintenanceRecords)
+const maintenanceCostStats = computed(() => store.maintenanceCostStats)
+const maintenanceCycleAnalysis = computed(() => store.maintenanceCycleAnalysis)
+const calendarEvents = computed(() => store.calendarEvents)
+const schemesMaintenanceComparison = computed(() => store.schemesMaintenanceComparison)
+const MAINTENANCE_TYPE_LABELS = computed(() => store.MAINTENANCE_TYPE_LABELS)
+const COMPONENT_NAMES = computed(() => store.COMPONENT_NAMES)
+
+const calendarCurrentDate = ref(new Date())
+const calendarView = ref<'month' | 'list'>('month')
+
+const comparisonSubtabs = [
+  { key: 'lifespan', label: '寿命对比' },
+  { key: 'maintenance', label: '维护对比' }
+]
+const comparisonSubtab = ref('lifespan')
 
 const computedForComparison = computed(() => {
   const computedSchemes: (Scheme & { lifespanEvaluation: NonNullable<Scheme['lifespanEvaluation']> })[] = []
@@ -701,6 +1169,576 @@ function updateComponentLifespanBar() {
   componentLifespanBarChart.setOption(option, true)
 }
 
+const dateTimeLocalValue = computed({
+    get: () => {
+      const d = new Date(newRecord.value.maintenanceDate)
+      const year = d.getFullYear()
+      const month = String(d.getMonth() + 1).padStart(2, '0')
+      const day = String(d.getDate()).padStart(2, '0')
+      const hours = String(d.getHours()).padStart(2, '0')
+      const minutes = String(d.getMinutes()).padStart(2, '0')
+      return `${year}-${month}-${day}T${hours}:${minutes}`
+    },
+    set: (val: string) => {
+      newRecord.value.maintenanceDate = new Date(val).getTime()
+    }
+  })
+
+const calendarDays = computed(() => {
+  const year = calendarCurrentDate.value.getFullYear()
+  const month = calendarCurrentDate.value.getMonth()
+  const firstDay = new Date(year, month, 1)
+  const lastDay = new Date(year, month + 1, 0)
+  const startDayOfWeek = firstDay.getDay()
+  const daysInMonth = lastDay.getDate()
+  
+  const days: Array<{
+    date: Date
+    isOtherMonth: boolean
+    isToday: boolean
+    events: any[]
+  }> = []
+  
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  
+  for (let i = 0; i < startDayOfWeek; i++) {
+    const d = new Date(year, month, -startDayOfWeek + i + 1)
+    days.push({
+      date: d,
+      isOtherMonth: true,
+      isToday: false,
+      events: getEventsForDate(d)
+    })
+  }
+  
+  for (let i = 1; i <= daysInMonth; i++) {
+    const d = new Date(year, month, i)
+    const dStart = new Date(d)
+    dStart.setHours(0, 0, 0, 0)
+    const dEnd = new Date(d)
+    dEnd.setHours(23, 59, 59, 999)
+    const isToday = dStart.getTime() === today.getTime()
+    
+    days.push({
+      date: d,
+      isOtherMonth: false,
+      isToday,
+      events: getEventsForDate(d)
+    })
+  }
+  
+  const remainingDays = 42 - days.length
+  for (let i = 1; i <= remainingDays; i++) {
+    const d = new Date(year, month + 1, i)
+    days.push({
+      date: d,
+      isOtherMonth: true,
+      isToday: false,
+      events: getEventsForDate(d)
+    })
+  }
+  
+  return days
+})
+
+function getEventsForDate(date: Date): any[] {
+  const startOfDay = new Date(date)
+  startOfDay.setHours(0, 0, 0, 0)
+  const endOfDay = new Date(date)
+  endOfDay.setHours(23, 59, 59, 999)
+  
+  return calendarEvents.value.filter(e => 
+    e.date >= startOfDay.getTime() && e.date <= endOfDay.getTime()
+  )
+}
+
+function changeMonth(delta: number) {
+  const newDate = new Date(calendarCurrentDate.value)
+  newDate.setMonth(newDate.getMonth() + delta)
+  calendarCurrentDate.value = newDate
+}
+
+function formatDate(timestamp: number): string {
+  const d = new Date(timestamp)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function formatDateTime(timestamp: number): string {
+  const d = new Date(timestamp)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function getEventIcon(type: string): string {
+  const map: Record<string, string> = {
+    maintenance: '✅',
+    scheduled: '📅',
+    alert: '🚨'
+  }
+  return map[type] || '📌'
+}
+
+function getPriorityLabel(priority: string): string {
+  const map: Record<string, string> = {
+    low: '低',
+    medium: '中',
+    high: '高',
+    critical: '紧急'
+  }
+  return map[priority] || priority
+}
+
+function openAddRecordModal() {
+  editingRecord.value = null
+  newRecord.value = {
+    maintenanceType: 'inspection',
+    component: 'system',
+    maintenanceDate: Date.now(),
+    description: '',
+    cost: 0,
+    operator: '',
+    remarks: ''
+  }
+  showAddRecordModal.value = true
+}
+
+function closeAddRecordModal() {
+  showAddRecordModal.value = false
+  editingRecord.value = null
+}
+
+function editRecord(record: any) {
+  editingRecord.value = record
+  newRecord.value = {
+    maintenanceType: record.maintenanceType,
+    component: record.component,
+    maintenanceDate: record.maintenanceDate,
+    description: record.description,
+    cost: record.cost,
+    operator: record.operator,
+    remarks: record.remarks
+  }
+  showAddRecordModal.value = true
+}
+
+function saveRecord() {
+  if (!newRecord.value.description.trim()) {
+    alert('请输入维护内容描述')
+    return
+  }
+  
+  if (editingRecord.value) {
+    store.updateMaintenanceRecord(editingRecord.value.id, {
+      maintenanceType: newRecord.value.maintenanceType,
+      component: newRecord.value.component,
+      maintenanceDate: newRecord.value.maintenanceDate,
+      description: newRecord.value.description,
+      cost: newRecord.value.cost,
+      operator: newRecord.value.operator,
+      remarks: newRecord.value.remarks
+    })
+  } else {
+    store.addMaintenanceRecord(
+      newRecord.value.maintenanceType,
+      newRecord.value.component,
+      newRecord.value.maintenanceDate,
+      newRecord.value.description,
+      newRecord.value.cost,
+      newRecord.value.operator,
+      newRecord.value.remarks
+    )
+  }
+  
+  closeAddRecordModal()
+}
+
+function deleteRecord(id: string) {
+  if (confirm('确定要删除这条维护记录吗？删除后相关寿命数据将重新计算。')) {
+    store.deleteMaintenanceRecord(id)
+  }
+}
+
+function initCostTrendChart() {
+  if (!costTrendChartRef.value) return
+  costTrendChart = echarts.init(costTrendChartRef.value)
+  updateCostTrendChart()
+}
+
+function updateCostTrendChart() {
+  if (!costTrendChart) return
+  const trendData = maintenanceCostStats.value.costTrend
+  
+  if (trendData.length === 0) {
+    costTrendChart.setOption({
+      backgroundColor: 'transparent',
+      title: {
+        text: '暂无维护成本数据',
+        left: 'center',
+        top: 'center',
+        textStyle: { color: '#999', fontSize: 14 }
+      }
+    })
+    return
+  }
+  
+  const option: echarts.EChartsOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: any) => {
+        let html = `${params[0].axisValue}<br/>`
+        params.forEach((p: any) => {
+          html += `${p.seriesName}: ¥${p.value.toLocaleString()}<br/>`
+        })
+        return html
+      }
+    },
+    legend: {
+      data: ['总费用', '检查费用', '阀片更换', '密封更换', '活塞更换'],
+      top: 0,
+      textStyle: { fontSize: 11 }
+    },
+    grid: { left: 55, right: 25, top: 40, bottom: 40 },
+    xAxis: {
+      type: 'category',
+      data: trendData.map(d => d.date),
+      axisLabel: { fontSize: 9, rotate: 30 }
+    },
+    yAxis: {
+      type: 'value',
+      name: '费用 (元)',
+      nameTextStyle: { fontSize: 10 },
+      axisLabel: { fontSize: 9 }
+    },
+    series: [
+      {
+        name: '总费用',
+        type: 'line',
+        data: trendData.map(d => d.totalCost),
+        smooth: true,
+        lineStyle: { color: '#2c3e50', width: 3 },
+        itemStyle: { color: '#2c3e50' },
+        showSymbol: true,
+        symbolSize: 8
+      },
+      {
+        name: '检查费用',
+        type: 'bar',
+        data: trendData.map(d => d.inspectionCost),
+        itemStyle: { color: '#3498db' },
+        stack: 'cost'
+      },
+      {
+        name: '阀片更换',
+        type: 'bar',
+        data: trendData.map(d => d.valveCost),
+        itemStyle: { color: '#e74c3c' },
+        stack: 'cost'
+      },
+      {
+        name: '密封更换',
+        type: 'bar',
+        data: trendData.map(d => d.sealCost),
+        itemStyle: { color: '#f39c12' },
+        stack: 'cost'
+      },
+      {
+        name: '活塞更换',
+        type: 'bar',
+        data: trendData.map(d => d.pistonCost),
+        itemStyle: { color: '#27ae60' },
+        stack: 'cost'
+      }
+    ]
+  }
+  
+  costTrendChart.setOption(option, true)
+}
+
+function initComponentReplacementChart() {
+  if (!componentReplacementChartRef.value) return
+  componentReplacementChart = echarts.init(componentReplacementChartRef.value)
+  updateComponentReplacementChart()
+}
+
+function updateComponentReplacementChart() {
+  if (!componentReplacementChart) return
+  const replacements = maintenanceCycleAnalysis.value.componentReplacements
+  
+  if (replacements.length === 0) {
+    componentReplacementChart.setOption({
+      backgroundColor: 'transparent',
+      title: {
+        text: '暂无部件更换数据',
+        left: 'center',
+        top: 'center',
+        textStyle: { color: '#999', fontSize: 14 }
+      }
+    })
+    return
+  }
+  
+  const option: echarts.EChartsOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' }
+    },
+    legend: {
+      data: ['更换次数', '累计费用', '单次平均费用'],
+      top: 0,
+      textStyle: { fontSize: 11 }
+    },
+    grid: { left: 55, right: 55, top: 40, bottom: 35 },
+    xAxis: {
+      type: 'category',
+      data: replacements.map(r => r.componentName),
+      axisLabel: { fontSize: 11 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '次数',
+        nameTextStyle: { fontSize: 10 },
+        axisLabel: { fontSize: 9 }
+      },
+      {
+        type: 'value',
+        name: '费用 (元)',
+        nameTextStyle: { fontSize: 10 },
+        axisLabel: { fontSize: 9 }
+      }
+    ],
+    series: [
+      {
+        name: '更换次数',
+        type: 'bar',
+        data: replacements.map(r => r.replacementCount),
+        itemStyle: { color: '#3498db' },
+        barWidth: 25,
+        yAxisIndex: 0
+      },
+      {
+        name: '累计费用',
+        type: 'bar',
+        data: replacements.map(r => r.totalCost),
+        itemStyle: { color: '#e74c3c' },
+        barWidth: 25,
+        yAxisIndex: 1
+      },
+      {
+        name: '单次平均费用',
+        type: 'line',
+        data: replacements.map(r => r.avgCost),
+        smooth: true,
+        lineStyle: { color: '#27ae60', width: 2 },
+        itemStyle: { color: '#27ae60' },
+        symbol: 'circle',
+        symbolSize: 10,
+        yAxisIndex: 1
+      }
+    ]
+  }
+  
+  componentReplacementChart.setOption(option, true)
+}
+
+function initCycleDeviationChart() {
+  if (!cycleDeviationChartRef.value) return
+  cycleDeviationChart = echarts.init(cycleDeviationChartRef.value)
+  updateCycleDeviationChart()
+}
+
+function updateCycleDeviationChart() {
+  if (!cycleDeviationChart) return
+  const deviations = maintenanceCycleAnalysis.value.cycleDeviations
+  
+  if (deviations.length === 0) {
+    cycleDeviationChart.setOption({
+      backgroundColor: 'transparent',
+      title: {
+        text: '暂无周期偏差数据',
+        left: 'center',
+        top: 'center',
+        textStyle: { color: '#999', fontSize: 14 }
+      }
+    })
+    return
+  }
+  
+  const option: echarts.EChartsOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' },
+      formatter: (params: any) => {
+        const dev = deviations[params[0].dataIndex]
+        return `${dev.componentName}<br/>
+          预期周期: ${dev.expectedCycleHours.toLocaleString()}h<br/>
+          实际周期: ${dev.actualCycleHours.toLocaleString()}h<br/>
+          偏差: ${dev.deviationHours > 0 ? '+' : ''}${dev.deviationHours.toLocaleString()}h (${dev.deviationPercent > 0 ? '+' : ''}${dev.deviationPercent}%)`
+      }
+    },
+    legend: {
+      data: ['预期周期', '实际周期', '偏差百分比'],
+      top: 0,
+      textStyle: { fontSize: 11 }
+    },
+    grid: { left: 55, right: 55, top: 40, bottom: 35 },
+    xAxis: {
+      type: 'category',
+      data: deviations.map(d => d.componentName),
+      axisLabel: { fontSize: 11 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '周期 (小时)',
+        nameTextStyle: { fontSize: 10 },
+        axisLabel: { 
+          fontSize: 9,
+          formatter: (val: number) => val >= 1000 ? `${(val / 1000).toFixed(1)}k` : String(val)
+        }
+      },
+      {
+        type: 'value',
+        name: '偏差 (%)',
+        nameTextStyle: { fontSize: 10 },
+        axisLabel: { fontSize: 9, formatter: '{value}%' }
+      }
+    ],
+    series: [
+      {
+        name: '预期周期',
+        type: 'bar',
+        data: deviations.map(d => d.expectedCycleHours),
+        itemStyle: { color: '#95a5a6' },
+        barWidth: 20,
+        yAxisIndex: 0
+      },
+      {
+        name: '实际周期',
+        type: 'bar',
+        data: deviations.map(d => d.actualCycleHours),
+        itemStyle: { 
+          color: (params: any) => {
+            const dev = deviations[params.dataIndex]
+            return dev.deviationPercent >= 0 ? '#27ae60' : '#e74c3c'
+          }
+        },
+        barWidth: 20,
+        yAxisIndex: 0
+      },
+      {
+        name: '偏差百分比',
+        type: 'line',
+        data: deviations.map(d => d.deviationPercent),
+        smooth: true,
+        lineStyle: { 
+          color: '#4a90d9' as any,
+          width: 3
+        },
+        itemStyle: { 
+          color: (params: any) => {
+            return params.value >= 0 ? '#27ae60' : '#e74c3c'
+          }
+        },
+        symbol: 'circle',
+        symbolSize: 10,
+        yAxisIndex: 1,
+        markLine: {
+          silent: true,
+          data: [{ yAxis: 0, lineStyle: { color: '#7f8c8d', type: 'dashed' } }]
+        }
+      } as any
+    ]
+  }
+  
+  cycleDeviationChart.setOption(option, true)
+}
+
+function updateMaintenanceCompareChart() {
+  if (!maintenanceCompareChart) return
+  const comparisonData = schemesMaintenanceComparison.value
+  if (comparisonData.length < 2) return
+  
+  const option: echarts.EChartsOption = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'shadow' }
+    },
+    legend: {
+      data: ['年维护成本', '平均寿命恢复', '健康度', '维护频率'],
+      top: 0,
+      textStyle: { fontSize: 11 }
+    },
+    grid: { left: 55, right: 55, top: 40, bottom: 35 },
+    xAxis: {
+      type: 'category',
+      data: comparisonData.map(d => d.schemeName),
+      axisLabel: { fontSize: 10, rotate: 15 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '费用/寿命/健康度',
+        nameTextStyle: { fontSize: 10 },
+        axisLabel: { fontSize: 9 }
+      },
+      {
+        type: 'value',
+        name: '维护频率(次/月)',
+        nameTextStyle: { fontSize: 10 },
+        axisLabel: { fontSize: 9 }
+      }
+    ],
+    series: [
+      {
+        name: '年维护成本',
+        type: 'bar',
+        data: comparisonData.map(d => d.totalCostPerYear),
+        itemStyle: { color: '#e74c3c' },
+        yAxisIndex: 0
+      },
+      {
+        name: '平均寿命恢复',
+        type: 'bar',
+        data: comparisonData.map(d => d.avgLifespanRestored),
+        itemStyle: { color: '#3498db' },
+        yAxisIndex: 0
+      },
+      {
+        name: '健康度',
+        type: 'line',
+        data: comparisonData.map(d => d.overallHealthScore),
+        smooth: true,
+        lineStyle: { color: '#27ae60', width: 2 },
+        itemStyle: { color: '#27ae60' },
+        yAxisIndex: 0
+      },
+      {
+        name: '维护频率',
+        type: 'line',
+        data: comparisonData.map(d => d.maintenanceFrequency),
+        smooth: true,
+        lineStyle: { color: '#f39c12', width: 2, type: 'dashed' },
+        itemStyle: { color: '#f39c12' },
+        yAxisIndex: 1
+      }
+    ]
+  }
+  
+  maintenanceCompareChart.setOption(option, true)
+}
+
+function updateMaintenanceCharts() {
+  updateCostTrendChart()
+  updateComponentReplacementChart()
+  updateCycleDeviationChart()
+  updateMaintenanceCompareChart()
+}
+
 function updateComparisonCharts() {
   const schemes = computedForComparison.value
   if (schemes.length < 2) return
@@ -812,23 +1850,6 @@ function updateComparisonCharts() {
   }
 }
 
-function handleResize() {
-  healthGaugeChart?.resize()
-  lifespanTrendChart?.resize()
-  componentLifespanBarChart?.resize()
-  compareHealthRadarChart?.resize()
-  compareLifespanBarChart?.resize()
-}
-
-function initComparisonCharts() {
-  if (compareHealthRadarRef.value) {
-    compareHealthRadarChart = echarts.init(compareHealthRadarRef.value)
-  }
-  if (compareLifespanBarRef.value) {
-    compareLifespanBarChart = echarts.init(compareLifespanBarRef.value)
-  }
-}
-
 watch(() => lifespanEvaluation.value, () => {
   setTimeout(() => {
     updateHealthGauge()
@@ -837,9 +1858,22 @@ watch(() => lifespanEvaluation.value, () => {
   }, 50)
 }, { deep: true })
 
+watch(() => store.lastMaintenanceTimestamp, () => {
+  setTimeout(() => {
+    updateMaintenanceCharts()
+  }, 100)
+})
+
+watch(() => maintenanceRecords.value.length, () => {
+  setTimeout(() => {
+    updateMaintenanceCharts()
+  }, 100)
+}, { deep: true })
+
 watch(selectedSchemes, () => {
   setTimeout(() => {
     updateComparisonCharts()
+    updateMaintenanceCompareChart()
     handleResize()
   }, 80)
 }, { deep: true })
@@ -852,20 +1886,56 @@ watch(activeSubtab, (newVal) => {
       updateLifespanTrendChart()
       updateComponentLifespanBar()
     }
-    if (newVal === 'comparison') updateComparisonCharts()
+    if (newVal === 'analysis') {
+      updateCostTrendChart()
+      updateComponentReplacementChart()
+      updateCycleDeviationChart()
+    }
+    if (newVal === 'comparison') {
+      updateComparisonCharts()
+      updateMaintenanceCompareChart()
+    }
   }, 60)
 })
+
+function handleResize() {
+  healthGaugeChart?.resize()
+  lifespanTrendChart?.resize()
+  componentLifespanBarChart?.resize()
+  compareHealthRadarChart?.resize()
+  compareLifespanBarChart?.resize()
+  costTrendChart?.resize()
+  componentReplacementChart?.resize()
+  cycleDeviationChart?.resize()
+  maintenanceCompareChart?.resize()
+}
+
+function initComparisonCharts() {
+  if (compareHealthRadarRef.value) {
+    compareHealthRadarChart = echarts.init(compareHealthRadarRef.value)
+  }
+  if (compareLifespanBarRef.value) {
+    compareLifespanBarChart = echarts.init(compareLifespanBarRef.value)
+  }
+  if (maintenanceCompareChartRef.value) {
+    maintenanceCompareChart = echarts.init(maintenanceCompareChartRef.value)
+  }
+}
 
 onMounted(() => {
   initHealthGauge()
   initLifespanTrendChart()
   initComponentLifespanBar()
   initComparisonCharts()
+  initCostTrendChart()
+  initComponentReplacementChart()
+  initCycleDeviationChart()
   setTimeout(() => {
     updateHealthGauge()
     updateLifespanTrendChart()
     updateComponentLifespanBar()
     updateComparisonCharts()
+    updateMaintenanceCharts()
   }, 120)
   window.addEventListener('resize', handleResize)
 })
@@ -876,6 +1946,10 @@ onUnmounted(() => {
   componentLifespanBarChart?.dispose()
   compareHealthRadarChart?.dispose()
   compareLifespanBarChart?.dispose()
+  costTrendChart?.dispose()
+  componentReplacementChart?.dispose()
+  cycleDeviationChart?.dispose()
+  maintenanceCompareChart?.dispose()
   window.removeEventListener('resize', handleResize)
 })
 </script>
@@ -1770,5 +2844,844 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+.comparison-subtabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.comparison-subtab {
+  padding: 6px 14px;
+  border: 1px solid #d0d7de;
+  border-radius: 16px;
+  background: white;
+  color: #666;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.comparison-subtab:hover {
+  background: #f0f4f8;
+  color: #2980b9;
+}
+
+.comparison-subtab.active {
+  background: #e8f4f8;
+  color: #2980b9;
+  border-color: #4a90d9;
+}
+
+.empty-compare.small {
+  min-height: 200px;
+}
+
+.table-note {
+  margin: 10px 0 0 0;
+  font-size: 11px;
+  color: #888;
+  text-align: right;
+}
+
+.maintenance-records-view,
+.maintenance-calendar-view,
+.maintenance-analysis-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.records-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.record-count-badge {
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #3498db;
+  color: white;
+  margin-left: 8px;
+}
+
+.add-record-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #27ae60, #219a52);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.add-record-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(39, 174, 96, 0.3);
+}
+
+.empty-records {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+  background: white;
+  border-radius: 12px;
+  border: 2px dashed #e0e0e0;
+}
+
+.empty-records .empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.record-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #3498db;
+  transition: all 0.2s;
+}
+
+.record-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.record-card.valve_replacement {
+  border-left-color: #e74c3c;
+}
+
+.record-card.seal_replacement {
+  border-left-color: #f39c12;
+}
+
+.record-card.piston_replacement {
+  border-left-color: #27ae60;
+}
+
+.record-card.inspection {
+  border-left-color: #3498db;
+}
+
+.record-card.other {
+  border-left-color: #95a5a6;
+}
+
+.record-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.record-type-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e8f4fd;
+  color: #2980b9;
+}
+
+.record-type-badge.valve_replacement {
+  background: #ffebee;
+  color: #c0392b;
+}
+
+.record-type-badge.seal_replacement {
+  background: #fef3e2;
+  color: #b7791f;
+}
+
+.record-type-badge.piston_replacement {
+  background: #e8f8f0;
+  color: #1e8449;
+}
+
+.record-type-badge.inspection {
+  background: #e8f4fd;
+  color: #2980b9;
+}
+
+.record-type-badge.other {
+  background: #f1f2f6;
+  color: #7f8c8d;
+}
+
+.record-component {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.record-date {
+  font-size: 11px;
+  color: #999;
+  margin-left: auto;
+}
+
+.record-body {
+  margin-bottom: 12px;
+}
+
+.record-description {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: #333;
+  line-height: 1.5;
+}
+
+.record-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  padding: 12px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.record-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.record-stat .stat-label {
+  font-size: 10px;
+  color: #999;
+}
+
+.record-stat .stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+}
+
+.record-stat .stat-value.cost {
+  color: #e67e22;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+
+.record-stat .stat-value.success {
+  color: #27ae60;
+}
+
+.record-remarks {
+  margin: 10px 0 0 0;
+  font-size: 12px;
+  color: #7f8c8d;
+  line-height: 1.5;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.record-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.record-action-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.record-action-btn.edit {
+  background: #e8f4fd;
+  color: #2980b9;
+}
+
+.record-action-btn.edit:hover {
+  background: #d4e9f0;
+}
+
+.record-action-btn.delete {
+  background: #fde8e8;
+  color: #c0392b;
+}
+
+.record-action-btn.delete:hover {
+  background: #f8d0d0;
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.calendar-view-toggle {
+  display: flex;
+  background: white;
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.view-toggle-btn {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  color: #666;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.view-toggle-btn.active {
+  background: #4a90d9;
+  color: white;
+}
+
+.calendar-month-view {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.calendar-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.nav-btn {
+  padding: 6px 12px;
+  border: 1px solid #e0e0e0;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.nav-btn:hover {
+  background: #f0f4f8;
+  border-color: #4a90d9;
+}
+
+.calendar-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background: #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.calendar-weekday {
+  background: #f8f9fa;
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+}
+
+.calendar-day {
+  background: white;
+  padding: 8px;
+  min-height: 70px;
+  position: relative;
+}
+
+.calendar-day.other-month {
+  background: #fafafa;
+  color: #ccc;
+}
+
+.calendar-day.today {
+  background: #e8f4fd;
+}
+
+.calendar-day.today .day-number {
+  background: #4a90d9;
+  color: white;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.calendar-day.has-events {
+  background: #fff8e1;
+}
+
+.day-number {
+  font-size: 12px;
+  font-weight: 500;
+  color: #333;
+}
+
+.other-month .day-number {
+  color: #ccc;
+}
+
+.day-events {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.day-event {
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.day-event.maintenance {
+  background: #d5f5e3;
+  color: #1e8449;
+}
+
+.day-event.scheduled {
+  background: #d6eaf8;
+  color: #2980b9;
+}
+
+.day-event.alert {
+  background: #fadbd8;
+  color: #c0392b;
+}
+
+.day-event.priority-critical {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.more-events {
+  font-size: 10px;
+  color: #666;
+  text-align: center;
+}
+
+.empty-calendar {
+  text-align: center;
+  padding: 40px 20px;
+  color: #999;
+  background: white;
+  border-radius: 12px;
+  border: 2px dashed #e0e0e0;
+}
+
+.empty-calendar .empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.event-item {
+  display: flex;
+  gap: 12px;
+  background: white;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #3498db;
+  transition: all 0.2s;
+}
+
+.event-item:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.event-item.maintenance {
+  border-left-color: #27ae60;
+  background: linear-gradient(90deg, #e8f8f0, white);
+}
+
+.event-item.scheduled {
+  border-left-color: #3498db;
+  background: linear-gradient(90deg, #e8f4fd, white);
+}
+
+.event-item.alert {
+  border-left-color: #e74c3c;
+  background: linear-gradient(90deg, #ffebee, white);
+}
+
+.event-item.completed {
+  opacity: 0.7;
+}
+
+.event-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.event-content {
+  flex: 1;
+}
+
+.event-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.event-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.event-priority {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.event-priority.low {
+  background: #e8f8f0;
+  color: #27ae60;
+}
+
+.event-priority.medium {
+  background: #e8f4fd;
+  color: #3498db;
+}
+
+.event-priority.high {
+  background: #fef3e2;
+  color: #e67e22;
+}
+
+.event-priority.critical {
+  background: #ffebee;
+  color: #e74c3c;
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.event-description {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: #666;
+  line-height: 1.5;
+}
+
+.event-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: #888;
+}
+
+.event-status.completed {
+  color: #27ae60;
+  font-weight: 500;
+}
+
+.event-status.pending {
+  color: #e67e22;
+  font-weight: 500;
+}
+
+.analysis-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.analysis-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: white;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #4a90d9;
+}
+
+.analysis-stat-card:nth-child(2) {
+  border-left-color: #f39c12;
+}
+
+.analysis-stat-card:nth-child(3) {
+  border-left-color: #27ae60;
+}
+
+.analysis-stat-card:nth-child(4) {
+  border-left-color: #e74c3c;
+}
+
+.analysis-stat-card .stat-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.analysis-stat-card .stat-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.analysis-stat-card .stat-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.analysis-stat-card .stat-number {
+  font-size: 20px;
+  font-weight: 700;
+  color: #2c3e50;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+
+.replacement-summary {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.replacement-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #e8ecef;
+}
+
+.replacement-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.replacement-table th,
+.replacement-table td {
+  padding: 10px 12px;
+  text-align: center;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.replacement-table th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #555;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.replacement-table tbody tr:hover {
+  background: #f5faff;
+}
+
+.replacement-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.replacement-table .cost {
+  color: #e67e22;
+  font-weight: 600;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.close-btn {
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  color: #999;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: border-color 0.2s;
+  font-family: inherit;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: #4a90d9;
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.1);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.btn-secondary:hover {
+  background: #e0e0e0;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #4a90d9, #357abd);
+  color: white;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(74, 144, 217, 0.3);
+}
+
+.comparison-table .cost {
+  color: #e67e22;
+  font-weight: 600;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+
+.comparison-table .success {
+  color: #27ae60;
+  font-weight: 600;
 }
 </style>

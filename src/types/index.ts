@@ -150,3 +150,117 @@ export interface LifespanComparisonData {
   maintenanceCycleHours: number
   hasHighRisk: boolean
 }
+
+export type MaintenanceType = 'inspection' | 'valve_replacement' | 'seal_replacement' | 'piston_replacement' | 'other'
+
+export type MaintenanceComponent = 'valve' | 'seal' | 'piston' | 'system'
+
+export interface MaintenanceRecord {
+  id: string
+  maintenanceType: MaintenanceType
+  component: MaintenanceComponent
+  maintenanceDate: number
+  description: string
+  cost: number
+  operator: string
+  remarks: string
+  lifespanRestored: number
+  healthScoreBefore: number
+  healthScoreAfter: number
+}
+
+export interface MaintenanceCostTrendPoint {
+  date: string
+  timestamp: number
+  totalCost: number
+  inspectionCost: number
+  valveCost: number
+  sealCost: number
+  pistonCost: number
+}
+
+export interface ComponentReplacementHistory {
+  component: MaintenanceComponent
+  componentName: string
+  replacementCount: number
+  totalCost: number
+  avgCost: number
+  firstReplacementDate: number
+  lastReplacementDate: number
+  avgIntervalHours: number
+}
+
+export interface MaintenanceCycleDeviationPoint {
+  component: MaintenanceComponent
+  componentName: string
+  expectedCycleHours: number
+  actualCycleHours: number
+  deviationHours: number
+  deviationPercent: number
+}
+
+export interface MaintenanceCostStats {
+  totalMaintenanceCost: number
+  inspectionCount: number
+  inspectionCost: number
+  valveReplacementCount: number
+  valveReplacementCost: number
+  sealReplacementCount: number
+  sealReplacementCost: number
+  pistonReplacementCount: number
+  pistonReplacementCost: number
+  avgMonthlyCost: number
+  costTrend: MaintenanceCostTrendPoint[]
+}
+
+export interface MaintenanceCycleAnalysis {
+  componentReplacements: ComponentReplacementHistory[]
+  cycleDeviations: MaintenanceCycleDeviationPoint[]
+  avgMaintenanceFrequency: number
+}
+
+export interface CalendarEvent {
+  id: string
+  title: string
+  date: number
+  type: 'maintenance' | 'scheduled' | 'alert'
+  component?: MaintenanceComponent
+  componentName?: string
+  description: string
+  isCompleted: boolean
+  priority: 'low' | 'medium' | 'high' | 'critical'
+}
+
+export interface SchemeMaintenanceComparison {
+  schemeId: string
+  schemeName: string
+  totalMaintenanceCost: number
+  maintenanceCount: number
+  avgLifespanRestored: number
+  avgHealthImprovement: number
+  maintenanceFrequency: number
+  valveLifespanHours: number
+  sealLifespanHours: number
+  pistonLifespanHours: number
+  overallHealthScore: number
+  totalCostPerYear: number
+}
+
+export interface Scheme {
+  id: string
+  name: string
+  params: BellowsParams
+  result: SimulationResult
+  timestamp: number
+  animationState: AnimationState
+  isPlaying: boolean
+  playbackSpeed: number
+  airFlowHistory: AirFlowDataPoint[]
+  pressureHistory: PressureDataPoint[]
+  efficiencyHistory: EfficiencyDataPoint[]
+  riskHistory: RiskDataPoint[]
+  lifespanEvaluation?: LifespanEvaluation
+  maintenanceRecords?: MaintenanceRecord[]
+  maintenanceCostStats?: MaintenanceCostStats
+  maintenanceCycleAnalysis?: MaintenanceCycleAnalysis
+}
