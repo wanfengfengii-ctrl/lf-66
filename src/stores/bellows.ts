@@ -24,7 +24,16 @@ import type {
   MaintenanceCycleDeviationPoint,
   MaintenanceCycleAnalysis,
   CalendarEvent,
-  SchemeMaintenanceComparison
+  SchemeMaintenanceComparison,
+  EnergyCostParams,
+  EnergyConsumption,
+  OperationCost,
+  EnergyEfficiencyAnalysis,
+  EnergyAnomalyInfo,
+  EnergySavingSuggestion,
+  EnergyHistoryPoint,
+  EnergyEvaluation,
+  SchemeEnergyComparison
 } from '@/types'
 
 const LEAK_THRESHOLD = 0.3
@@ -42,6 +51,18 @@ const WARNING_LIFESPAN_RATIO = 0.3
 const DANGER_LIFESPAN_RATIO = 0.15
 const LIFESPAN_TREND_POINTS = 20
 const LIFESPAN_TREND_RANGE_HOURS = 10000
+
+const HIGH_FREQ_ENERGY_THRESHOLD = 6
+const HIGH_RESISTANCE_ENERGY_THRESHOLD = 0.5
+const HIGH_LEAKAGE_ENERGY_THRESHOLD = 10
+const HIGH_LOAD_ENERGY_THRESHOLD = 1.0
+const POOR_MAINTENANCE_HEALTH_THRESHOLD = 60
+
+const BASE_POWER_COEFFICIENT = 0.0015
+const FREQUENCY_POWER_EXPONENT = 1.3
+const LOAD_POWER_COEFFICIENT = 0.8
+const RESISTANCE_POWER_COEFFICIENT = 0.6
+const ENERGY_HISTORY_POINTS = 100
 
 const MAINTENANCE_TYPE_LABELS: Record<MaintenanceType, string> = {
   inspection: '例行检查',
@@ -129,6 +150,16 @@ export const useBellowsStore = defineStore('bellows', () => {
   const maintenanceRecords = ref<MaintenanceRecord[]>([])
   const componentAdjustedLifespans = ref<Record<string, number>>({})
   const lastMaintenanceTimestamp = ref<number>(0)
+
+  const energyCostParams = ref<EnergyCostParams>({
+    electricityPrice: 1.2,
+    maintenanceCostPerHour: 50,
+    dailyOperatingHours: 8,
+    monthlyOperatingDays: 22,
+    systemEfficiency: 85
+  })
+
+  const energyHistory = ref<EnergyHistoryPoint[]>([])
 
   const effectiveValveArea = computed(() => {
     if (params.value.valveStuck) {
@@ -800,6 +831,473 @@ export const useBellowsStore = defineStore('bellows', () => {
     })
   }
 
+  function computeEnergyConsumption(p: BellowsParams): EnergyConsumption {
+    const frequency = p.rodFrequency
+    const load = p.loadPressure
+    const resistance = p.environmentalResistance
+    const leakage = p.leakageRate
+    const stroke = p.pistonStroke
+    const pistonArea = p.chamberWidth * p.chamberDepth
+
+    const basePower = BASE_POWER_COEFFICIENT * pistonArea * stroke
+    const frequencyPower = Math.pow(Math.max(0.1, frequency), FREQUENCY_POWER_EXPONENT)
+    const loadPower = 1 + load * LOAD_POWER_COEFFICIENT
+    const resistancePower = 1 + resistance * RESISTANCE_POWER_COEFFICIENT
+    const leakagePower = 1 + (leakage / 100) * 0.5
+
+    const powerPerSecond = basePower * frequencyPower * loadPower * resistancePower * leakagePower
+    const powerPerHour = powerPerSecond * 3600 / 1000
+    const dailyEnergy = powerPerHour * energyCostParams.value.dailyOperatingHours
+    const monthlyEnergy = dailyEnergy * energyCostParams.value.monthlyOperatingDays
+    const yearlyEnergy = monthlyEnergy * 12
+
+    return {
+      powerPerSecond,
+      powerPerHour,
+      dailyEnergy,
+      monthlyEnergy,
+      yearlyEnergy
+    }
+  }
+
+  function computeOperationCost(energy: EnergyConsumption, p: BellowsParams, efficiency: number): OperationCost {
+    const cp = energyCostParams.value
+    const systemEfficiencyFactor = cp.systemEfficiency / 100
+
+    const energyCostPerHour = energy.powerPerHour * cp.electricityPrice / systemEfficiencyFactor
+    const maintenanceCostPerHour = cp.maintenanceCostPerHour * (1 + (p.leakageRate / 100) * 0.3)
+    const efficiencyLossRate = Math.max(0, (100 - efficiency) / 100)
+    const efficiencyLossCostPerHour = energyCostPerHour * efficiencyLossRate * 0.5
+
+    const costPerHour = energyCostPerHour + maintenanceCostPerHour + efficiencyLossCostPerHour
+    const costPerSecond = costPerHour / 3600
+    const costPerCycle = costPerHour / Math.max(1, p.rodFrequency * 3600) * 1000
+
+    const dailyOperatingHours = cp.dailyOperatingHours
+    const monthlyOperatingDays = cp.monthlyOperatingDays
+
+    const dailyEnergyCost = energy.dailyEnergy * cp.electricityPrice / systemEfficiencyFactor
+    const dailyMaintenanceCost = maintenanceCostPerHour * dailyOperatingHours
+    const dailyEfficiencyLossCost = efficiencyLossCostPerHour * dailyOperatingHours
+    const dailyCost = dailyEnergyCost + dailyMaintenanceCost + dailyEfficiencyLossCost
+
+    const monthlyCost = dailyCost * monthlyOperatingDays
+    const yearlyCost = monthlyCost * 12
+
+    return {
+      costPerSecond,
+      costPerHour,
+      costPerCycle,
+      dailyCost,
+      monthlyCost,
+      yearlyCost,
+      breakdown: {
+        energyCost: dailyEnergyCost * monthlyOperatingDays * 12,
+        maintenanceCost: dailyMaintenanceCost * monthlyOperatingDays * 12,
+        efficiencyLossCost: dailyEfficiencyLossCost * monthlyOperatingDays * 12,
+        totalCost: yearlyCost
+      }
+    }
+  }
+
+  function computeEfficiencyAnalysis(energy: EnergyConsumption, p: BellowsParams, currentEfficiency: number): EnergyEfficiencyAnalysis {
+    const cp = energyCostParams.value
+    const systemEfficiencyFactor = cp.systemEfficiency / 100
+
+    const theoreticalEnergy = energy.powerPerHour / systemEfficiencyFactor
+    const actualEnergy = energy.powerPerHour / (currentEfficiency / 100) / systemEfficiencyFactor
+    const efficiencyLossRate = Math.max(0, 100 - currentEfficiency)
+    const efficiencyLossCostPerHour = (actualEnergy - theoreticalEnergy) * cp.electricityPrice * 0.5
+
+    const optimalFrequency = Math.min(p.rodFrequency, 4)
+    const optimalLeakage = Math.min(p.leakageRate, 2)
+    const optimalResistance = Math.min(p.environmentalResistance, 0.2)
+    const optimalLoad = Math.min(p.loadPressure, 0.5)
+
+    const freqRatio = optimalFrequency / Math.max(0.1, p.rodFrequency)
+    const leakRatio = (100 - optimalLeakage) / Math.max(1, 100 - p.leakageRate)
+    const resistRatio = (1 - optimalResistance * 0.5) / Math.max(0.1, 1 - p.environmentalResistance * 0.5)
+    const loadRatio = (1 - optimalLoad * 0.4) / Math.max(0.1, 1 - p.loadPressure * 0.4)
+
+    const savingPotentialPercent = Math.min(80, Math.max(0, (1 - freqRatio * leakRatio * resistRatio * loadRatio) * 100))
+
+    return {
+      theoreticalEnergy,
+      actualEnergy,
+      efficiencyLossRate,
+      efficiencyLossCostPerHour,
+      energySavingPotential: savingPotentialPercent
+    }
+  }
+
+  function detectEnergyAnomalies(
+    p: BellowsParams,
+    energy: EnergyConsumption,
+    _efficiency: number,
+    lifespan: LifespanEvaluation
+  ): EnergyAnomalyInfo[] {
+    const anomalies: EnergyAnomalyInfo[] = []
+    const cp = energyCostParams.value
+
+    if (p.rodFrequency > HIGH_FREQ_ENERGY_THRESHOLD) {
+      const extraCostPerYear = (energy.powerPerHour * (Math.pow(p.rodFrequency, 1.3) - Math.pow(HIGH_FREQ_ENERGY_THRESHOLD, 1.3)) *
+        cp.electricityPrice * cp.dailyOperatingHours * cp.monthlyOperatingDays * 12) / 100
+      anomalies.push({
+        type: 'high_frequency',
+        level: p.rodFrequency >= 8 ? 'danger' : 'warning',
+        message: `高频运行（${p.rodFrequency.toFixed(1)}Hz）：能耗随频率呈指数增长，预计年额外成本约 ¥${extraCostPerYear.toFixed(0)}`,
+        value: p.rodFrequency,
+        threshold: HIGH_FREQ_ENERGY_THRESHOLD,
+        costImpact: extraCostPerYear
+      })
+    }
+
+    if (p.environmentalResistance > HIGH_RESISTANCE_ENERGY_THRESHOLD) {
+      const extraCostPerYear = (energy.powerPerHour * (p.environmentalResistance - HIGH_RESISTANCE_ENERGY_THRESHOLD) * 0.6 *
+        cp.electricityPrice * cp.dailyOperatingHours * cp.monthlyOperatingDays * 12) / 100
+      anomalies.push({
+        type: 'high_resistance',
+        level: p.environmentalResistance >= 1.0 ? 'danger' : 'warning',
+        message: `高环境阻力（${(p.environmentalResistance * 100).toFixed(0)}%）：管道阻力增加能耗，预计年额外成本约 ¥${extraCostPerYear.toFixed(0)}`,
+        value: p.environmentalResistance,
+        threshold: HIGH_RESISTANCE_ENERGY_THRESHOLD,
+        costImpact: extraCostPerYear
+      })
+    }
+
+    if (p.leakageRate > HIGH_LEAKAGE_ENERGY_THRESHOLD) {
+      const extraCostPerYear = (energy.powerPerHour * (p.leakageRate - HIGH_LEAKAGE_ENERGY_THRESHOLD) * 0.005 *
+        cp.electricityPrice * cp.dailyOperatingHours * cp.monthlyOperatingDays * 12)
+      anomalies.push({
+        type: 'high_leakage',
+        level: p.leakageRate >= 20 ? 'danger' : 'warning',
+        message: `高漏气率（${p.leakageRate.toFixed(1)}%）：密封失效导致能源浪费，预计年额外成本约 ¥${extraCostPerYear.toFixed(0)}`,
+        value: p.leakageRate,
+        threshold: HIGH_LEAKAGE_ENERGY_THRESHOLD,
+        costImpact: extraCostPerYear
+      })
+    }
+
+    if (p.loadPressure > HIGH_LOAD_ENERGY_THRESHOLD) {
+      const extraCostPerYear = (energy.powerPerHour * (p.loadPressure - HIGH_LOAD_ENERGY_THRESHOLD) * 0.8 *
+        cp.electricityPrice * cp.dailyOperatingHours * cp.monthlyOperatingDays * 12) / 100
+      anomalies.push({
+        type: 'high_load',
+        level: p.loadPressure >= 1.5 ? 'danger' : 'warning',
+        message: `高负载压力（${p.loadPressure.toFixed(2)}atm）：重载运行显著增加能耗，预计年额外成本约 ¥${extraCostPerYear.toFixed(0)}`,
+        value: p.loadPressure,
+        threshold: HIGH_LOAD_ENERGY_THRESHOLD,
+        costImpact: extraCostPerYear
+      })
+    }
+
+    if (lifespan.overallHealthScore < POOR_MAINTENANCE_HEALTH_THRESHOLD) {
+      const extraCostPerYear = (energy.powerPerHour * (100 - lifespan.overallHealthScore) * 0.01 *
+        cp.electricityPrice * cp.dailyOperatingHours * cp.monthlyOperatingDays * 12)
+      anomalies.push({
+        type: 'poor_maintenance',
+        level: lifespan.overallHealthScore < 30 ? 'danger' : 'warning',
+        message: `维护状态不佳（健康度${lifespan.overallHealthScore.toFixed(1)}%）：部件磨损导致能效下降，预计年额外成本约 ¥${extraCostPerYear.toFixed(0)}`,
+        value: lifespan.overallHealthScore,
+        threshold: POOR_MAINTENANCE_HEALTH_THRESHOLD,
+        costImpact: extraCostPerYear
+      })
+    }
+
+    return anomalies.sort((a, b) => b.costImpact - a.costImpact)
+  }
+
+  function generateEnergySavingSuggestions(
+    p: BellowsParams,
+    energy: EnergyConsumption,
+    efficiency: number,
+    anomalies: EnergyAnomalyInfo[],
+    lifespan: LifespanEvaluation
+  ): EnergySavingSuggestion[] {
+    const suggestions: EnergySavingSuggestion[] = []
+    const cp = energyCostParams.value
+    const yearlyOperatingHours = cp.dailyOperatingHours * cp.monthlyOperatingDays * 12
+
+    if (p.rodFrequency > HIGH_FREQ_ENERGY_THRESHOLD) {
+      const currentCost = energy.powerPerHour * cp.electricityPrice * yearlyOperatingHours
+      const targetFreq = 4
+      const savingRatio = 1 - Math.pow(targetFreq / p.rodFrequency, FREQUENCY_POWER_EXPONENT)
+      const savingAmount = currentCost * savingRatio
+
+      suggestions.push({
+        id: 'saving_freq',
+        category: 'parameter_optimization',
+        priority: p.rodFrequency >= 8 ? 'critical' : 'high',
+        title: '降低运行频率',
+        description: `当前频率 ${p.rodFrequency.toFixed(1)}Hz 过高，建议降低至 ${targetFreq}Hz 左右。能耗与频率呈指数关系（${FREQUENCY_POWER_EXPONENT}次方），降频可显著节能。`,
+        estimatedSavingPercent: Math.round(savingRatio * 100),
+        estimatedSavingCostPerYear: Math.round(savingAmount),
+        implementationCost: '¥0',
+        difficulty: 'easy',
+        paybackPeriod: '立即'
+      })
+    }
+
+    if (p.leakageRate > HIGH_LEAKAGE_ENERGY_THRESHOLD) {
+      const savingAmount = anomalies.find(a => a.type === 'high_leakage')?.costImpact ||
+        (energy.powerPerHour * p.leakageRate * 0.01 * cp.electricityPrice * yearlyOperatingHours * 0.3)
+
+      suggestions.push({
+        id: 'saving_seal',
+        category: 'maintenance',
+        priority: p.leakageRate >= 20 ? 'critical' : 'high',
+        title: '修复密封件减少漏气',
+        description: `当前漏气率 ${p.leakageRate.toFixed(1)}%，建议检查并更换密封件。漏气不仅浪费能源，还会降低系统性能。`,
+        estimatedSavingPercent: Math.round(Math.min(30, p.leakageRate * 2)),
+        estimatedSavingCostPerYear: Math.round(savingAmount),
+        implementationCost: '¥200-500',
+        difficulty: 'medium',
+        paybackPeriod: '1-3个月'
+      })
+    }
+
+    if (p.environmentalResistance > HIGH_RESISTANCE_ENERGY_THRESHOLD) {
+      const savingAmount = anomalies.find(a => a.type === 'high_resistance')?.costImpact ||
+        (energy.powerPerHour * p.environmentalResistance * 0.3 * cp.electricityPrice * yearlyOperatingHours)
+
+      suggestions.push({
+        id: 'saving_pipe',
+        category: 'component_upgrade',
+        priority: p.environmentalResistance >= 1.0 ? 'high' : 'medium',
+        title: '优化管道设计降低阻力',
+        description: `当前环境阻力系数 ${(p.environmentalResistance * 100).toFixed(0)}%，建议检查管道布局，减少弯头和收缩，或增大管径。`,
+        estimatedSavingPercent: Math.round(Math.min(25, p.environmentalResistance * 20)),
+        estimatedSavingCostPerYear: Math.round(savingAmount),
+        implementationCost: '¥1000-3000',
+        difficulty: 'hard',
+        paybackPeriod: '6-12个月'
+      })
+    }
+
+    if (p.loadPressure > HIGH_LOAD_ENERGY_THRESHOLD) {
+      const targetLoad = 0.8
+      const savingRatio = (p.loadPressure - targetLoad) * 0.3
+      const savingAmount = energy.powerPerHour * cp.electricityPrice * yearlyOperatingHours * savingRatio
+
+      suggestions.push({
+        id: 'saving_load',
+        category: 'operation_optimization',
+        priority: p.loadPressure >= 1.5 ? 'high' : 'medium',
+        title: '优化负载匹配',
+        description: `当前负载压力 ${p.loadPressure.toFixed(2)}atm，建议评估实际需求，优化系统匹配，避免大马拉小车。`,
+        estimatedSavingPercent: Math.round(savingRatio * 100),
+        estimatedSavingCostPerYear: Math.round(savingAmount),
+        implementationCost: '¥0-500',
+        difficulty: 'medium',
+        paybackPeriod: '1-2个月'
+      })
+    }
+
+    if (lifespan.overallHealthScore < POOR_MAINTENANCE_HEALTH_THRESHOLD) {
+      const savingAmount = anomalies.find(a => a.type === 'poor_maintenance')?.costImpact ||
+        (energy.powerPerHour * (100 - lifespan.overallHealthScore) * 0.005 * cp.electricityPrice * yearlyOperatingHours)
+
+      suggestions.push({
+        id: 'saving_maintenance',
+        category: 'maintenance',
+        priority: lifespan.overallHealthScore < 30 ? 'critical' : 'high',
+        title: '执行预防性维护',
+        description: `系统健康度仅 ${lifespan.overallHealthScore.toFixed(1)}%，建议按照维护计划及时更换磨损部件，恢复系统能效。`,
+        estimatedSavingPercent: Math.round((100 - lifespan.overallHealthScore) * 0.5),
+        estimatedSavingCostPerYear: Math.round(savingAmount),
+        implementationCost: '¥500-2000',
+        difficulty: 'medium',
+        paybackPeriod: '2-6个月'
+      })
+    }
+
+    if (efficiency < 60) {
+      const savingAmount = energy.powerPerHour * (60 - efficiency) * 0.01 * cp.electricityPrice * yearlyOperatingHours * 0.8
+
+      suggestions.push({
+        id: 'saving_valve',
+        category: 'component_upgrade',
+        priority: efficiency < 40 ? 'high' : 'medium',
+        title: '升级阀片组件',
+        description: `当前系统效率仅 ${efficiency.toFixed(1)}%，建议检查阀片状态，必要时升级为高效阀片，改善气流特性。`,
+        estimatedSavingPercent: Math.round(Math.min(20, (60 - efficiency) * 0.5)),
+        estimatedSavingCostPerYear: Math.round(savingAmount),
+        implementationCost: '¥300-800',
+        difficulty: 'medium',
+        paybackPeriod: '3-6个月'
+      })
+    }
+
+    if (suggestions.length === 0 || efficiency >= 80) {
+      suggestions.push({
+        id: 'saving_monitor',
+        category: 'operation_optimization',
+        priority: 'low',
+        title: '持续监控运行参数',
+        description: '当前系统运行状态良好，建议定期监控能耗数据，保持良好的维护习惯，确保能效水平稳定。',
+        estimatedSavingPercent: 5,
+        estimatedSavingCostPerYear: Math.round(energy.yearlyEnergy * cp.electricityPrice * 0.05),
+        implementationCost: '¥0',
+        difficulty: 'easy',
+        paybackPeriod: '持续'
+      })
+    }
+
+    const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+    return suggestions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority] ||
+      b.estimatedSavingCostPerYear - a.estimatedSavingCostPerYear)
+  }
+
+  function computeEnergyEvaluationFromParams(
+    p: BellowsParams,
+    costParams?: EnergyCostParams,
+    lifespanEval?: LifespanEvaluation
+  ): EnergyEvaluation {
+    const backupCp = costParams || energyCostParams.value
+    const simEff = computeTheoreticalEfficiency(p)
+    const lifespan = lifespanEval || computeLifespanFromParams(p)
+
+    const oldCp = { ...energyCostParams.value }
+    if (costParams) {
+      energyCostParams.value = { ...costParams }
+    }
+
+    try {
+      const energy = computeEnergyConsumption(p)
+      const cost = computeOperationCost(energy, p, simEff)
+      const effAnalysis = computeEfficiencyAnalysis(energy, p, simEff)
+      const anomalies = detectEnergyAnomalies(p, energy, simEff, lifespan)
+      const suggestions = generateEnergySavingSuggestions(p, energy, simEff, anomalies, lifespan)
+      const history = generateEnergyHistoryData(p, backupCp)
+
+      const hasWarning = anomalies.some(a => a.level === 'warning')
+      const hasDanger = anomalies.some(a => a.level === 'danger')
+
+      return {
+        energyConsumption: energy,
+        operationCost: cost,
+        efficiencyAnalysis: effAnalysis,
+        anomalies,
+        suggestions,
+        energyHistory: history,
+        costParams: backupCp,
+        hasHighEnergyWarning: hasWarning,
+        hasHighEnergyDanger: hasDanger
+      }
+    } finally {
+      energyCostParams.value = oldCp
+    }
+  }
+
+  function computeTheoreticalEfficiency(p: BellowsParams): number {
+    const valveFlowCoeff = Math.min(1, p.valveOpeningArea / (p.chamberWidth * p.chamberDepth * 0.3))
+    const baseEff = 0.35 + 0.65 * valveFlowCoeff
+    const resistanceFactor = Math.max(0.1, 1 - p.environmentalResistance * 0.5)
+    const loadFactor = Math.max(0.2, 1 - p.loadPressure * 0.4)
+    const leakFactor = Math.max(0, 1 - p.leakageRate / 100)
+    const stuckFactor = p.valveStuck ? 1 - p.valveStuckLevel * 0.6 : 1
+
+    return Math.min(100, baseEff * resistanceFactor * loadFactor * leakFactor * stuckFactor * 100)
+  }
+
+  function generateEnergyHistoryData(p: BellowsParams, _cp: EnergyCostParams): EnergyHistoryPoint[] {
+    const history: EnergyHistoryPoint[] = []
+    const totalDuration = 10
+    const timeStep = totalDuration / ENERGY_HISTORY_POINTS
+    const baseEnergy = computeEnergyConsumption(p)
+
+    for (let i = 0; i < ENERGY_HISTORY_POINTS; i++) {
+      const time = i * timeStep
+      const omega = 2 * Math.PI * p.rodFrequency
+      const strokePhase = Math.sin(omega * time + Math.PI / 4)
+      const powerVariation = 0.8 + 0.4 * Math.abs(strokePhase)
+      const instantPower = baseEnergy.powerPerSecond * powerVariation
+      const instantEnergy = baseEnergy.powerPerHour * (time / 3600)
+      const instantEfficiency = computeTheoreticalEfficiency(p) * (0.95 + 0.1 * Math.random())
+
+      history.push({
+        time,
+        power: instantPower,
+        energy: instantEnergy,
+        efficiency: Math.min(100, instantEfficiency)
+      })
+    }
+
+    return history
+  }
+
+  function ensureSchemeEnergy(scheme: Scheme): EnergyEvaluation {
+    if (scheme.energyEvaluation) return scheme.energyEvaluation
+    const computed = computeEnergyEvaluationFromParams(scheme.params, scheme.energyCostParams)
+    scheme.energyEvaluation = computed
+    return computed
+  }
+
+  function computeSchemesEnergyComparison(schemes: Scheme[]): SchemeEnergyComparison[] {
+    return schemes.map(scheme => {
+      const energyEval = scheme.energyEvaluation || computeEnergyEvaluationFromParams(scheme.params, scheme.energyCostParams)
+      const simEff = computeTheoreticalEfficiency(scheme.params)
+
+      return {
+        schemeId: scheme.id,
+        schemeName: scheme.name,
+        powerPerHour: Math.round(energyEval.energyConsumption.powerPerHour * 1000) / 1000,
+        dailyCost: Math.round(energyEval.operationCost.dailyCost * 100) / 100,
+        monthlyCost: Math.round(energyEval.operationCost.monthlyCost),
+        yearlyCost: Math.round(energyEval.operationCost.yearlyCost),
+        efficiencyLossCostPerHour: Math.round(energyEval.efficiencyAnalysis.efficiencyLossCostPerHour * 100) / 100,
+        overallEfficiency: Math.round(simEff * 10) / 10,
+        totalCostPerYear: Math.round(energyEval.operationCost.yearlyCost),
+        savingPotential: Math.round(energyEval.efficiencyAnalysis.energySavingPotential * 10) / 10
+      }
+    })
+  }
+
+  function updateEnergyCostParam<K extends keyof EnergyCostParams>(key: K, value: EnergyCostParams[K]) {
+    if (typeof value === 'number' && value < 0) {
+      value = 0 as EnergyCostParams[K]
+    }
+    energyCostParams.value[key] = value
+    generateEnergyHistory()
+  }
+
+  function generateEnergyHistory() {
+    energyHistory.value = generateEnergyHistoryData(params.value, energyCostParams.value)
+  }
+
+  function updateEnergyHistory() {
+    const latestPoint = energyHistory.value[energyHistory.value.length - 1]
+    if (!latestPoint) {
+      generateEnergyHistory()
+      return
+    }
+
+    const energy = computeEnergyConsumption(params.value)
+    const newTime = animationState.value.time
+    const omega = 2 * Math.PI * params.value.rodFrequency
+    const strokePhase = Math.sin(omega * newTime + Math.PI / 4)
+    const powerVariation = 0.8 + 0.4 * Math.abs(strokePhase)
+
+    energyHistory.value.push({
+      time: newTime,
+      power: energy.powerPerSecond * powerVariation,
+      energy: energy.powerPerHour * (newTime / 3600),
+      efficiency: computeTheoreticalEfficiency(params.value)
+    })
+
+    if (energyHistory.value.length > MAX_HISTORY_POINTS) {
+      energyHistory.value.shift()
+    }
+  }
+
+  const energyEvaluation = computed<EnergyEvaluation>(() => {
+    return computeEnergyEvaluationFromParams(params.value, energyCostParams.value, lifespanEvaluation.value)
+  })
+
+  const schemesEnergyComparison = computed<SchemeEnergyComparison[]>(() => {
+    return computeSchemesEnergyComparison(schemes.value)
+  })
+
   function computeMaintenanceCostStatsForRecords(records: MaintenanceRecord[]): MaintenanceCostStats {
     let totalCost = 0
     let inspectionCount = 0, inspectionCost = 0
@@ -1079,6 +1577,8 @@ export const useBellowsStore = defineStore('bellows', () => {
       efficiencyHistory.value.push({ time, efficiency: Math.min(100, eff) })
       riskHistory.value.push({ time, riskScore: Math.min(100, valveRiskAtTime) })
     }
+
+    generateEnergyHistory()
   }
 
   function computeInstantRisk(state: AnimationState, flow: number): number {
@@ -1130,6 +1630,8 @@ export const useBellowsStore = defineStore('bellows', () => {
     if (pressureHistory.value.length > MAX_HISTORY_POINTS) pressureHistory.value.shift()
     if (efficiencyHistory.value.length > MAX_HISTORY_POINTS) efficiencyHistory.value.shift()
     if (riskHistory.value.length > MAX_HISTORY_POINTS) riskHistory.value.shift()
+
+    updateEnergyHistory()
   }
 
   function resetAnimation() {
@@ -1191,7 +1693,9 @@ export const useBellowsStore = defineStore('bellows', () => {
       lifespanEvaluation: deepClone(lifespanEvaluation.value),
       maintenanceRecords: deepClone(maintenanceRecords.value),
       maintenanceCostStats: deepClone(maintenanceCostStats.value),
-      maintenanceCycleAnalysis: deepClone(maintenanceCycleAnalysis.value)
+      maintenanceCycleAnalysis: deepClone(maintenanceCycleAnalysis.value),
+      energyEvaluation: deepClone(energyEvaluation.value),
+      energyCostParams: deepClone(energyCostParams.value)
     }
     schemes.value.push(scheme)
     saveSchemesToStorage(schemes.value)
@@ -1222,6 +1726,13 @@ export const useBellowsStore = defineStore('bellows', () => {
       efficiencyHistory.value = deepClone(scheme.efficiencyHistory || [])
       riskHistory.value = deepClone(scheme.riskHistory || [])
 
+      if (scheme.energyCostParams) {
+        energyCostParams.value = deepClone(scheme.energyCostParams)
+      }
+      if (scheme.energyEvaluation) {
+        energyHistory.value = deepClone(scheme.energyEvaluation.energyHistory || [])
+      }
+
       if (scheme.maintenanceRecords) {
         loadMaintenanceRecords(scheme.maintenanceRecords)
       } else {
@@ -1232,6 +1743,9 @@ export const useBellowsStore = defineStore('bellows', () => {
 
       if (airFlowHistory.value.length === 0) {
         generateFullHistory()
+      }
+      if (energyHistory.value.length === 0) {
+        generateEnergyHistory()
       }
     }
   }
@@ -1257,7 +1771,10 @@ export const useBellowsStore = defineStore('bellows', () => {
 
   const selectedSchemes = computed(() => {
     const list = schemes.value.filter(s => selectedSchemeIds.value.includes(s.id))
-    list.forEach(s => ensureSchemeLifespan(s))
+    list.forEach(s => {
+      ensureSchemeLifespan(s)
+      ensureSchemeEnergy(s)
+    })
     return list
   })
 
@@ -1326,6 +1843,21 @@ export const useBellowsStore = defineStore('bellows', () => {
     togglePlay,
     seekToTime,
     endSeek,
-    setPlaybackSpeed
+    setPlaybackSpeed,
+    energyCostParams,
+    energyHistory,
+    energyEvaluation,
+    schemesEnergyComparison,
+    computeEnergyConsumption,
+    computeOperationCost,
+    computeEfficiencyAnalysis,
+    detectEnergyAnomalies,
+    generateEnergySavingSuggestions,
+    computeEnergyEvaluationFromParams,
+    ensureSchemeEnergy,
+    computeSchemesEnergyComparison,
+    updateEnergyCostParam,
+    generateEnergyHistory,
+    updateEnergyHistory
   }
 })

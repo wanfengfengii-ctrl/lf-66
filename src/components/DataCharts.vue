@@ -10,23 +10,27 @@
         {{ tab.label }}
       </button>
       <div
-        v-if="lifespanEvaluation.hasHighRisk"
+        v-if="lifespanEvaluation.hasHighRisk || energyEvaluation.hasHighEnergyDanger"
         class="tab-risk-indicator danger"
-        title="存在紧急风险部件，建议立即处理"
+        title="存在紧急风险，建议立即处理"
       >
-        🚨 {{ lifespanEvaluation.highRiskComponents.length }}
+        🚨 {{ lifespanEvaluation.highRiskComponents.length + energyEvaluation.anomalies.filter(a => a.level === 'danger').length }}
       </div>
       <div
-        v-else-if="lifespanEvaluation.hasWarning"
+        v-else-if="lifespanEvaluation.hasWarning || energyEvaluation.hasHighEnergyWarning"
         class="tab-risk-indicator warning"
-        title="存在预警级部件，请安排维护"
+        title="存在异常预警，请及时关注"
       >
-        ⚠️ {{ lifespanEvaluation.warningComponents.length }}
+        ⚠️ {{ lifespanEvaluation.warningComponents.length + energyEvaluation.anomalies.filter(a => a.level === 'warning').length }}
       </div>
     </div>
 
     <div v-show="activeTab === 'lifespan'" class="lifespan-view">
       <LifespanPrediction />
+    </div>
+
+    <div v-show="activeTab === 'energy'" class="energy-view">
+      <EnergyCostEvaluation />
     </div>
 
     <div v-show="activeTab === 'realtime'" class="charts-grid">
@@ -140,6 +144,7 @@ import * as echarts from 'echarts'
 import { useBellowsStore } from '@/stores/bellows'
 import type { Scheme } from '@/types'
 import LifespanPrediction from './LifespanPrediction.vue'
+import EnergyCostEvaluation from './EnergyCostEvaluation.vue'
 
 const store = useBellowsStore()
 
@@ -147,11 +152,13 @@ const chartTabs = [
   { key: 'overview', label: '📈 总览' },
   { key: 'realtime', label: '📊 实时趋势' },
   { key: 'lifespan', label: '🔧 寿命与维护' },
+  { key: 'energy', label: '⚡ 能耗与成本' },
   { key: 'comparison', label: '🆚 方案对比' }
 ]
 const activeTab = ref('overview')
 
 const lifespanEvaluation = computed(() => store.lifespanEvaluation)
+const energyEvaluation = computed(() => store.energyEvaluation)
 
 const comparisonSubtabs = [
   { key: 'summary', label: '📊 汇总对比' },

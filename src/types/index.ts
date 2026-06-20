@@ -246,6 +246,101 @@ export interface SchemeMaintenanceComparison {
   totalCostPerYear: number
 }
 
+export interface EnergyCostParams {
+  electricityPrice: number
+  maintenanceCostPerHour: number
+  dailyOperatingHours: number
+  monthlyOperatingDays: number
+  systemEfficiency: number
+}
+
+export interface EnergyConsumption {
+  powerPerSecond: number
+  powerPerHour: number
+  dailyEnergy: number
+  monthlyEnergy: number
+  yearlyEnergy: number
+}
+
+export interface CostBreakdown {
+  energyCost: number
+  maintenanceCost: number
+  efficiencyLossCost: number
+  totalCost: number
+}
+
+export interface OperationCost {
+  costPerSecond: number
+  costPerHour: number
+  costPerCycle: number
+  dailyCost: number
+  monthlyCost: number
+  yearlyCost: number
+  breakdown: CostBreakdown
+}
+
+export interface EnergyEfficiencyAnalysis {
+  theoreticalEnergy: number
+  actualEnergy: number
+  efficiencyLossRate: number
+  efficiencyLossCostPerHour: number
+  energySavingPotential: number
+}
+
+export interface EnergyAnomalyInfo {
+  type: 'high_frequency' | 'high_resistance' | 'high_leakage' | 'poor_maintenance' | 'high_load'
+  level: 'warning' | 'danger' | 'info'
+  message: string
+  value: number
+  threshold: number
+  costImpact: number
+}
+
+export interface EnergySavingSuggestion {
+  id: string
+  category: 'parameter_optimization' | 'maintenance' | 'component_upgrade' | 'operation_optimization'
+  priority: 'low' | 'medium' | 'high' | 'critical'
+  title: string
+  description: string
+  estimatedSavingPercent: number
+  estimatedSavingCostPerYear: number
+  implementationCost: string
+  difficulty: 'easy' | 'medium' | 'hard'
+  paybackPeriod: string
+}
+
+export interface EnergyHistoryPoint {
+  time: number
+  power: number
+  energy: number
+  efficiency: number
+}
+
+export interface EnergyEvaluation {
+  energyConsumption: EnergyConsumption
+  operationCost: OperationCost
+  efficiencyAnalysis: EnergyEfficiencyAnalysis
+  anomalies: EnergyAnomalyInfo[]
+  suggestions: EnergySavingSuggestion[]
+  energyHistory: EnergyHistoryPoint[]
+  costParams: EnergyCostParams
+  hasHighEnergyWarning: boolean
+  hasHighEnergyDanger: boolean
+}
+
+export interface SchemeEnergyComparison {
+  schemeId: string
+  schemeName: string
+  powerPerHour: number
+  dailyCost: number
+  monthlyCost: number
+  yearlyCost: number
+  efficiencyLossCostPerHour: number
+  overallEfficiency: number
+  totalCostPerYear: number
+  savingPotential: number
+}
+
 export interface Scheme {
   id: string
   name: string
@@ -263,4 +358,6 @@ export interface Scheme {
   maintenanceRecords?: MaintenanceRecord[]
   maintenanceCostStats?: MaintenanceCostStats
   maintenanceCycleAnalysis?: MaintenanceCycleAnalysis
+  energyEvaluation?: EnergyEvaluation
+  energyCostParams?: EnergyCostParams
 }
